@@ -17,7 +17,7 @@ func main() {
 	if botToken == "" {
 		log.Panic("TELEGRAM_BOT_TOKEN эта переменная окружения не существует, пожалуйста, добавьте её")
 	}
-	bot, err := tgbotapi.NewBotAPI()
+	bot, err := tgbotapi.NewBotAPI(botToken)
 	if err != nil {
 		log.Panic(err)
 	}

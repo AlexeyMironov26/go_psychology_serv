@@ -198,6 +198,7 @@ class SimplePsychBot:
         self.application.run_polling()
 
 # Запуск бота
+token=""
 if __name__ == "__main__":
-    bot = SimplePsychBot("8023641205:AAG0SbFyC_jx25wKCwJGb8meoUHXE_WShSU")
+    bot = SimplePsychBot(token)
     bot.run()

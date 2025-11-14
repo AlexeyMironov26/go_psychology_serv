@@ -1,4 +1,5 @@
 import logging
+from tokenbot import tokenbot
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
@@ -198,7 +199,6 @@ class SimplePsychBot:
         self.application.run_polling()
 
 # Запуск бота
-token=""
 if __name__ == "__main__":
-    bot = SimplePsychBot(token)
+    bot = SimplePsychBot(tokenbot)
     bot.run()

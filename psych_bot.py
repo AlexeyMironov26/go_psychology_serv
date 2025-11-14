@@ -1,3 +1,6 @@
+import json
+import sqlite3
+from datetime import datetime
 import logging
 from tokenbot import tokenbot
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -13,6 +16,87 @@ class SimplePsychBot:
     def __init__(self, token: str):
         self.application = Application.builder().token(token).build()
         self.setup_handlers()
+        self.init_database()  # ДОБАВЬ ЭТУ СТРОКУ
+
+    def init_database(self):
+        """Инициализация базы данных SQLite"""
+        conn = sqlite3.connect('psych_bot.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_id INTEGER UNIQUE NOT NULL,
+                username TEXT,
+                full_name TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS test_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                test_name TEXT NOT NULL,
+                test_data TEXT NOT NULL,
+                completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+
+    def save_user(self, telegram_id, username, full_name):
+        """Сохранить пользователя в БД"""
+        conn = sqlite3.connect('psych_bot.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT OR IGNORE INTO users (telegram_id, username, full_name)
+            VALUES (?, ?, ?)
+        ''', (telegram_id, username, full_name))
+        
+        conn.commit()
+        conn.close()
+
+    def save_test_result(self, telegram_id, test_name, test_data):
+        """Сохранить результат теста"""
+        conn = sqlite3.connect('psych_bot.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT id FROM users WHERE telegram_id = ?', (telegram_id,))
+        user = cursor.fetchone()
+        
+        if user:
+            user_id = user[0]
+            test_data_json = json.dumps(test_data, ensure_ascii=False)
+            
+            cursor.execute('''
+                INSERT INTO test_results (user_id, test_name, test_data)
+                VALUES (?, ?, ?)
+            ''', (user_id, test_name, test_data_json))
+        
+        conn.commit()
+        conn.close()
+
+    def get_user_results(self, telegram_id):
+        """Получить результаты пользователя"""
+        conn = sqlite3.connect('psych_bot.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT tr.test_name, tr.test_data, tr.completed_at 
+            FROM test_results tr
+            JOIN users u ON tr.user_id = u.id
+            WHERE u.telegram_id = ?
+            ORDER BY tr.completed_at DESC
+        ''', (telegram_id,))
+        
+        results = cursor.fetchall()
+        conn.close()
+        return results
+
     
     def setup_handlers(self):
         self.application.add_handler(CommandHandler("start", self.start))
@@ -20,9 +104,13 @@ class SimplePsychBot:
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Главное меню"""
+        user = update.effective_user
+        self.save_user(user.id, user.username, user.full_name)  # ДОБАВЬ ЭТУ СТРОКУ
+        
         keyboard = [
             [InlineKeyboardButton("ℹ️ О психологической службе", callback_data="info")],
-            [InlineKeyboardButton("📊 Опросник агрессивности", callback_data="start_test")]
+            [InlineKeyboardButton("📊 Тесты", callback_data="tests")],
+            [InlineKeyboardButton("📈 Мои результаты", callback_data="my_results")]  # НОВАЯ КНОПКА
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -31,6 +119,33 @@ class SimplePsychBot:
             reply_markup=reply_markup
         )
     
+    async def show_my_results(self, query):
+        """Показать результаты пользователя"""
+        results = self.get_user_results(query.from_user.id)
+        
+        if not results:
+            text = "📝 У вас пока нет пройденных тестов."
+            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]]
+        else:
+            text = "📊 **Ваши результаты тестов:**\n\n"
+            
+            for i, (test_name, test_data_json, completed_at) in enumerate(results[:10]):
+                test_data = json.loads(test_data_json)
+                text += f"**{test_name}**\n"
+                text += f"📅 {completed_at}\n"
+                
+                if 'scores' in test_data:
+                    text += f"• Агрессивность: {test_data.get('aggression_index', 'N/A')}\n"
+                    text += f"• Враждебность: {test_data.get('hostility_index', 'N/A')}\n"
+                
+                text += "─" * 20 + "\n\n"
+            
+            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+
+
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка всех callback'ов"""
         query = update.callback_query
@@ -40,15 +155,40 @@ class SimplePsychBot:
         
         if data == "info":
             await self.show_info(query)
-        elif data == "start_test":
-            await self.start_test(query, context)
-        elif data == "next_question":  # ДОБАВЬ ЭТУ СТРОКУ
-            await self.show_question(query, context)  # ДОБАВЬ ЭТУ СТРОКУ
+        elif data == "tests":
+            await self.show_tests_menu(query)  # Новый метод для меню тестов
+        elif data == "my_results":  # ДОБАВЬ ЭТО УСЛОВИЕ
+            await self.show_my_results(query)
+        elif data == "aggression_test":
+            await self.start_aggression_test(query, context)  # Переименовали метод
+        elif data == "next_question":
+            await self.show_question(query, context)
         elif data.startswith("answer_"):
             await self.handle_test_answer(query, context)
         elif data == "back_to_menu":
             await self.back_to_menu(query)
-            
+        elif data == "back_to_tests":  # Новая кнопка для возврата к списку тестов
+            await self.show_tests_menu(query)
+
+    async def show_tests_menu(self, query):
+        """Меню с доступными тестами"""
+        tests_menu_text = """
+📊 **Доступные тесты**
+
+Выберите тест для прохождения:
+        """
+        
+        keyboard = [
+            [InlineKeyboardButton("📝 Опросник агрессивности", callback_data="aggression_test")],
+            # Здесь можно добавить другие тесты в будущем
+            # [InlineKeyboardButton("😊 Тест на стресс", callback_data="stress_test")],
+            # [InlineKeyboardButton("😴 Тест на выгорание", callback_data="burnout_test")],
+            [InlineKeyboardButton("🔙 В главное меню", callback_data="back_to_menu")]
+        ]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(tests_menu_text, reply_markup=reply_markup, parse_mode='Markdown')
+
     async def show_info(self, query):
         """Показать информацию о службе"""
         info_text = """
@@ -64,11 +204,39 @@ class SimplePsychBot:
 📞 Телефон: +7 (495) 957-77-00
         """
         
-        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]]
+        keyboard = [
+            [InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]
+        ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(info_text, reply_markup=reply_markup)
 
+    async def start_aggression_test(self, query, context):
+        """Начать опросник агрессивности"""
+        context.user_data['test_answers'] = []
+        context.user_data['current_question'] = 0
+        context.user_data['test_questions'] = self.get_test_questions()
+        
+        # Инструкция
+        instruction = """
+📋 **Опросник уровня агрессивности**
+
+**Инструкция:**
+Отметьте «да», если вы согласны с утверждением, и «нет» - если не согласны.
+Старайтесь долго над вопросами не раздумывать.
+
+Опросник содержит 75 вопросов.
+        """
+        
+        keyboard = [
+            [InlineKeyboardButton("▶️ Начать тест", callback_data="next_question")],
+            [InlineKeyboardButton("🔙 К списку тестов", callback_data="back_to_tests")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(instruction, reply_markup=reply_markup, parse_mode='Markdown')
+
+    # Все остальные методы остаются без изменений:
     def get_test_questions(self):
         """Возвращает список всех 75 вопросов опросника"""
         return [
@@ -148,28 +316,7 @@ class SimplePsychBot:
             "Я стараюсь обычно скрывать свое плохое отношение к людям",
             "Я лучше соглашусь с чем-либо, чем стану спорить"
         ]
-    
-    async def start_test(self, query, context):
-        """Начать опросник агрессивности"""
-        context.user_data['test_answers'] = []
-        context.user_data['current_question'] = 0
-        context.user_data['test_questions'] = self.get_test_questions()
-        
-        # Инструкция
-        instruction = """
-📋 **Опросник уровня агрессивности**
 
-**Инструкция:**
-Отметьте «да», если вы согласны с утверждением, и «нет» - если не согласны.
-Старайтесь долго над вопросами не раздумывать.
-
-Опросник содержит 75 вопросов.
-        """
-        
-        keyboard = [[InlineKeyboardButton("▶️ Начать тест", callback_data="next_question")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(instruction, reply_markup=reply_markup, parse_mode='Markdown')
     
     async def show_question(self, query, context):
         """Показать текущий вопрос"""
@@ -185,7 +332,7 @@ class SimplePsychBot:
         keyboard = [
             [InlineKeyboardButton("✅ Да", callback_data="answer_1")],
             [InlineKeyboardButton("❌ Нет", callback_data="answer_0")],
-            [InlineKeyboardButton("⏹️ Прервать тест", callback_data="back_to_menu")]
+            [InlineKeyboardButton("⏹️ Прервать тест", callback_data="back_to_tests")]
         ]
         
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -277,6 +424,14 @@ class SimplePsychBot:
         aggression_index = (scores['physical_aggression'] + scores['irritation'] + 
                           scores['verbal_aggression'])
         hostility_index = scores['resentment'] + scores['suspicion']
+
+        test_data = {
+            'scores': scores,
+            'aggression_index': aggression_index,
+            'hostility_index': hostility_index,
+            'answers_count': len(answers)
+        }
+        self.save_test_result(query.from_user.id, "Опросник агрессивности", test_data)
         
         await self.show_results(query, scores, aggression_index, hostility_index)
     
@@ -315,7 +470,10 @@ class SimplePsychBot:
         
         result_text += "\n\nДля подробной интерпретации результатов обратитесь к психологу."
         
-        keyboard = [[InlineKeyboardButton("🔙 В главное меню", callback_data="back_to_menu")]]
+        keyboard = [
+            [InlineKeyboardButton("🔙 К списку тестов", callback_data="back_to_tests")],
+            [InlineKeyboardButton("🏠 В главное меню", callback_data="back_to_menu")]
+        ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(result_text, reply_markup=reply_markup, parse_mode='Markdown')
@@ -324,7 +482,8 @@ class SimplePsychBot:
         """Вернуться в главное меню"""
         keyboard = [
             [InlineKeyboardButton("ℹ️ О психологической службе", callback_data="info")],
-            [InlineKeyboardButton("📊 Опросник агрессивности", callback_data="start_test")]
+            [InlineKeyboardButton("📊 Тесты", callback_data="tests")],
+            [InlineKeyboardButton("📈 Мои результаты", callback_data="my_results")]  # ДОБАВЬ ЭТУ СТРОКУ
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -335,7 +494,6 @@ class SimplePsychBot:
     
     def run(self):
         self.application.run_polling()
-
 
 # Запуск бота
 if __name__ == "__main__":

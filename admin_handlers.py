@@ -6,6 +6,14 @@ from telegram.ext import ContextTypes
 ADMIN_IDS = [475439608, 1489252140, 6155787421]
 
 class AdminHandler:
+    # Словарь кодов факультетов
+    faculty_codes = {
+            "Радио и Телевидение": "1",
+            "Информационные Технологии": "2", 
+            "Сети и Системы Связи": "3",
+            "Кибернетика и Информационная Безопасность": "4"
+        }
+    code_to_faculty = {v: k for k, v in faculty_codes.items()}
     def __init__(self, db_path='psych_bot.db'):
         self.db_path = db_path
     
@@ -13,17 +21,17 @@ class AdminHandler:
         """Проверка, является ли пользователь администратором"""
         return telegram_id in ADMIN_IDS
     
-    async def admin_start(self, update_or_message, context=None):
+    async def admin_start(self, message, context=None):
         """Начало работы для администратора"""
         # Обрабатываем оба варианта: Update или Message
-        if hasattr(update_or_message, 'effective_user'):
+        if hasattr(message, 'effective_user'):
             # Это Update
-            telegram_id = update_or_message.effective_user.id
-            message = update_or_message.message
-        elif hasattr(update_or_message, 'from_user'):
+            telegram_id = message.effective_user.id
+            message = message.message
+        elif hasattr(message, 'from_user'):
             # Это Message или CallbackQuery
-            telegram_id = update_or_message.from_user.id
-            message = update_or_message
+            telegram_id = message.from_user.id
+            message = message
         else:
             # Неизвестный тип
             return
@@ -50,29 +58,41 @@ class AdminHandler:
     
     async def show_admin_tests_menu(self, query, action_type):
         """Меню выбора теста для админских функций"""
+        # Упрощаем callback_data
+        if action_type == "faculty_avg":
+            callback_data = "avg_aggression"  # Было: "faculty_avg_aggression"
+        elif action_type == "all_avg":
+            callback_data = "all_aggression"  # Было: "all_avg_aggression"
+        elif action_type == "raw":
+            callback_data = "raw_aggression"  # Было: "raw_aggression" (уже короткий)
+        else:
+            callback_data = "avg_aggression"
+        
         keyboard = [
-            [InlineKeyboardButton("Опросник исследования уровня агрессивности", callback_data=f"{action_type}_aggression")],
+            [InlineKeyboardButton("Опросник исследования уровня агрессивности", 
+                                callback_data=callback_data)],
             [InlineKeyboardButton("🔙 Назад", callback_data="admin_back")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
-            "Выберете тест, по которому вас интересуют результаты:",
+            "Выберите тест, по которому вас интересуют результаты:",
             reply_markup=reply_markup
         )
-    
+
     async def show_faculty_selection(self, query, test_type):
         """Выбор факультета"""
-        faculties = [
-            "Радио и Телевидение",
-            "Информационные Технологии", 
-            "Сети и Системы Связи",
-            "Кибернетика и Информационная Безопасность"
-        ]
+        
+        # Словарь для обратного преобразования (понадобится позже)
+        code_to_faculty = {v: k for k, v in self.faculty_codes.items()}
         
         keyboard = []
-        for faculty in faculties:
-            keyboard.append([InlineKeyboardButton(faculty, callback_data=f"faculty_{faculty}_{test_type}")])
+        for faculty_name, faculty_code in self.faculty_codes.items():
+            # Короткий callback_data: "fac_1_agg"
+            callback_data = f"fac_{faculty_code}_{test_type[:3]}"  # test_type[:3] = "agg" для aggression
+            
+            keyboard.append([InlineKeyboardButton(faculty_name, callback_data=callback_data)])
+        
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="admin_back")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -130,19 +150,26 @@ class AdminHandler:
             'count': result[10]
         }
     
-    async def show_faculty_averages(self, query, faculty, test_type):
+    async def show_faculty_averages(self, query, faculty_code, test_type):
         """Показать средние значения по факультету"""
-        if test_type != "aggression":
+        # Получаем оригинальное название факультета по коду
+        faculty_name = self.code_to_faculty.get(faculty_code)  # ИСПРАВЛЕНО!
+        
+        if not faculty_name:
+            # Если mapping не найден, используем код
+            faculty_name = f"Факультет {faculty_code}"
+        
+        if test_type != "agg":  # Проверяем сокращенный тип теста
             await query.message.reply_text("Тест пока не реализован")
             return
         
-        averages = self.get_faculty_averages(faculty)
+        averages = self.get_faculty_averages(faculty_name)  # Используем полное название
         
         if not averages:
             await query.message.reply_text("Нет данных по выбранному факультету")
             return
         
-        text = f"📊 Средние значения для факультета '{faculty}':\n\n"
+        text = f"📊 Средние значения для факультета '{faculty_code}':\n\n"
         
         scale_names = {
             'physical_aggression': 'Физическая агрессия',

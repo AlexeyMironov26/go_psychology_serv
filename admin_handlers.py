@@ -2,6 +2,9 @@ import sqlite3
 import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
+import logging
+
+
 
 ADMIN_IDS = [475439608, 1489252140, 6155787421]
 
@@ -50,9 +53,12 @@ class AdminHandler:
         await message.reply_text(
             "У вас есть доступ к результатам психологических тестов студентов МТУСИ, "
             "вы можете использовать одну из следующих команд, нажав на кнопку с соответствующим названием:\n\n"
-            "1. 📊 Средние значения по факультету - получить усредненные результаты по выбранному факультету\n"
-            "2. 🏫 Средние значения по всем факультетам - общие усредненные результаты\n"
-            "3. 📈 Сырые результаты студентов - детальные данные студентов",
+            "1. 📊 Средние значения по факультету - получить усредненные результаты тестов студентов по выбранному факультету\n"
+            "2. 🏫 Средние значения по всем факультетам - получить усредненные результаты тестов студентов со всех факультетов\n"
+            "3. 📈 Сырые результаты студентов - получить результаты тестов студентов в чистом виде"
+            " (конкретного студента/всех студентов факультета/всех студентов)\n\n"
+            "(если возникла ошибка или непредвиденая ситуация при взаимодействии с ботом,"
+            " просто вернитесь в это меню, отправив команду /results)",
             reply_markup=reply_markup
         )
     
@@ -71,7 +77,6 @@ class AdminHandler:
         keyboard = [
             [InlineKeyboardButton("Опросник исследования уровня агрессивности", 
                                 callback_data=callback_data)],
-            [InlineKeyboardButton("🔙 Назад", callback_data="admin_back")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -82,18 +87,12 @@ class AdminHandler:
 
     async def show_faculty_selection(self, query, test_type):
         """Выбор факультета"""
-        
-        # Словарь для обратного преобразования (понадобится позже)
-        code_to_faculty = {v: k for k, v in self.faculty_codes.items()}
-        
         keyboard = []
         for faculty_name, faculty_code in self.faculty_codes.items():
-            # Короткий callback_data: "fac_1_agg"
+            #callback_data: "fac_1_agg"
             callback_data = f"fac_{faculty_code}_{test_type[:3]}"  # test_type[:3] = "agg" для aggression
             
             keyboard.append([InlineKeyboardButton(faculty_name, callback_data=callback_data)])
-        
-        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="admin_back")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -153,7 +152,7 @@ class AdminHandler:
     async def show_faculty_averages(self, query, faculty_code, test_type):
         """Показать средние значения по факультету"""
         # Получаем оригинальное название факультета по коду
-        faculty_name = self.code_to_faculty.get(faculty_code)  # ИСПРАВЛЕНО!
+        faculty_name = self.code_to_faculty.get(faculty_code)  
         
         if not faculty_name:
             # Если mapping не найден, используем код
@@ -169,7 +168,7 @@ class AdminHandler:
             await query.message.reply_text("Нет данных по выбранному факультету")
             return
         
-        text = f"📊 Средние значения для факультета '{faculty_code}':\n\n"
+        text = f"📊 Средние значения для факультета '{faculty_name}':\n\n"
         
         scale_names = {
             'physical_aggression': 'Физическая агрессия',
@@ -193,10 +192,6 @@ class AdminHandler:
         text += "• Индекс агрессивности: 21 ± 4 (17-25)\n"
         text += "• Индекс враждебности: 6.5-7 ± 3 (3.5-10)\n\n"
         
-        # Проверка на превышение норм
-        aggression_norm = 21
-        hostility_norm = 6.5
-        
         if averages['aggression_index'] > 25:
             text += "⚠️ Индекс агрессивности ПРЕВЫШАЕТ норму\n"
         elif averages['aggression_index'] < 17:
@@ -214,7 +209,6 @@ class AdminHandler:
         text += f"\nВсего тестов: {averages['count']}"
         
         await query.message.reply_text(text)
-        await self.admin_start(query.message, None)
     
     async def show_all_averages(self, query, test_type):
         """Показать средние значения по всем факультетам"""
@@ -270,15 +264,15 @@ class AdminHandler:
         text += f"\nВсего тестов: {averages['count']}"
         
         await query.message.reply_text(text)
-        await self.admin_start(query.message, None)
     
-    async def show_raw_data_menu(self, query):
+    async def show_raw_data_menu(self, update):
+        query=update.callback_query
         """Меню для сырых данных"""
         keyboard = [
             [InlineKeyboardButton("Данные конкретного студента", callback_data="raw_single")],
             [InlineKeyboardButton("Данные факультета", callback_data="raw_faculty")],
             [InlineKeyboardButton("Данные всех факультетов", callback_data="raw_all")],
-            [InlineKeyboardButton("🔙 Назад", callback_data="admin_back")]
+        
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -286,23 +280,18 @@ class AdminHandler:
             "Выберите тип данных:",
             reply_markup=reply_markup
         )
+       
     
-    async def request_student_name(self, query):
-        """Запрос ФИО студента"""
-        await query.message.reply_text(
-            "Введите, пожалуйста, ФИО студента (например: Иванов Иван Иванович):"
-        )
-        # Здесь нужно будет сохранить состояние для ожидания ответа
     
     def get_raw_data(self, student_name=None, faculty=None):
         """Получение сырых данных из БД"""
-        conn = sqlite3.connect(self.db_path, timeout=30)
+        conn = sqlite3.connect(self.db_path, timeout=10)
         cursor = conn.cursor()
         
         query = """
         SELECT 
             u.full_name,
-            u.group,
+            u.user_group,
             u.faculty,
             atr.completed_at,
             atr.physical_aggression,
@@ -338,15 +327,31 @@ class AdminHandler:
         
         return results
     
-    async def show_raw_data(self, query, data_type, faculty=None, student_name=None):
+    async def show_raw_data(self, update, faculty=None, student_name=None):
         """Показать сырые данные"""
+        query=update.callback_query
+
+        logger1 = logging.getLogger(__name__)
+        logger1.warning("RAW DATA WORKS")
+
+        # Извлекаем message из update
+        if update.callback_query:
+            damessage = update.callback_query.message
+            # Подтверждаем нажатие кнопки (если это callback)
+            await update.callback_query.answer()
+        elif update.message:
+            damessage = update.message
+        else:
+            logger1.error("Не удалось извлечь сообщение из Update")
+            return
+        
         results = self.get_raw_data(student_name=student_name, faculty=faculty)
         
         if not results:
             if student_name:
-                await query.message.reply_text("Извините, но такой студент не проходил тест")
+                await damessage.reply_text("Извините, но такой студент не проходил тест")
             else:
-                await query.message.reply_text("Нет данных по выбранному критерию")
+                await damessage.reply_text("Нет данных по выбранному критерию")
             return
         
         # Нормы в начале сообщения
@@ -356,8 +361,11 @@ class AdminHandler:
         norms_text += "Результаты:\n\n"
         
         # Формируем данные
+        # в одно сообщение умещаются данные примеро 7ми студентов
+        #из за ограничений тг максимум 20 сообщений в минуту в 1 чат(иначе блок бота), 
+        # при больших объёмах данных нужно будет установить sleep (искуственные задержки между отправками сообщений)
         data_text = ""
-        for row in results[:50]:  # Ограничиваем количество для одного сообщения
+        for row in results: 
             full_name, group, faculty, completed_at, *scales = row
             aggression_idx = scales[-2]
             hostility_idx = scales[-1]
@@ -365,15 +373,34 @@ class AdminHandler:
             # Проверка норм
             aggression_norm = "✅" if 17 <= aggression_idx <= 25 else "❌"
             hostility_norm = "✅" if 3.5 <= hostility_idx <= 10 else "❌"
+            scale_names=["Физическая агрессия",
+                            "Косвенная агрессия",
+                            "Раздражение",
+                            "Негативизм",
+                            "Обида",
+                            "Подозрительность",
+                            "Вербальная агрессия",
+                            "Угрызения совести, чувство вины"]
+            
+            scale_max_pts={"Физическая агрессия": 10,
+                            "Косвенная агрессия": 9,
+                            "Раздражение": 11,
+                            "Негативизм": 5,
+                            "Обида": 8,
+                            "Подозрительность": 10,
+                            "Вербальная агрессия": 12,
+                            "Угрызения совести, чувство вины": 9}
             
             data_text += f"👤 {full_name}\n"
             data_text += f"   Группа: {group}\n"
             data_text += f"   Факультет: {faculty}\n"
-            data_text += f"   Дата: {completed_at}\n"
-            data_text += f"   Шкалы: {'/'.join(map(str, scales[:-2]))}\n"
+            data_text += f"   Дата прохождения теста: {completed_at}\n"
+            
+            for idx in range(len(scale_names)):
+                data_text += f"   {scale_names[idx]}: {str(scales[idx])}/{str(scale_max_pts[scale_names[idx]])}\n"
             data_text += f"   Агрессивность: {aggression_idx} {aggression_norm}\n"
             data_text += f"   Враждебность: {hostility_idx} {hostility_norm}\n"
-            data_text += "-" * 30 + "\n"
+            data_text += "-" * 50 + "\n"
         
         # Разбиваем на несколько сообщений если нужно
         full_text = norms_text + data_text
@@ -381,8 +408,9 @@ class AdminHandler:
         if len(full_text) > 4000:
             chunks = [full_text[i:i+4000] for i in range(0, len(full_text), 4000)]
             for chunk in chunks:
-                await query.message.reply_text(chunk)
+                await damessage.reply_text(chunk)
         else:
-            await query.message.reply_text(full_text)
+            await damessage.reply_text(full_text) #если символов в тексте меньше 4000 тысяч, 
+            #то отправляем одним сообщением
         
-        await self.admin_start(query.message, None)
+        # await self.admin_start(query.message, None)

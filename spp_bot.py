@@ -32,12 +32,12 @@ class PsychBot:
         
         self.init_database()
         self.setup_handlers()
-        self.load_last_update_id()
+        # self.load_last_update_id()
     
     def init_database(self):
         """Инициализация базы данных SQLite с таймаутом"""
         try:
-            conn = sqlite3.connect('psych_bot.db', timeout=5)
+            conn = sqlite3.connect('psych_bot.db', timeout=10)
             cursor = conn.cursor()
             
             # Таблица для последнего update_id
@@ -89,40 +89,40 @@ class PsychBot:
             logger.error(f"Database initialization error: {e}")
             raise
     
-    def save_last_update_id(self, update_id):
-        """Сохранение последнего обработанного update_id"""
-        try:
-            conn = sqlite3.connect('psych_bot.db', timeout=5)
-            cursor = conn.cursor()
+    # def save_last_update_id(self, update_id):
+    #     """Сохранение последнего обработанного update_id"""
+    #     try:
+    #         conn = sqlite3.connect('psych_bot.db', timeout=5)
+    #         cursor = conn.cursor()
             
-            cursor.execute('SELECT id FROM updates')
-            if cursor.fetchone():
-                cursor.execute('UPDATE updates SET last_update_id = ? WHERE id = 1', (update_id,))
-            else:
-                cursor.execute('INSERT INTO updates (id, last_update_id) VALUES (1, ?)', (update_id,))
+    #         cursor.execute('SELECT id FROM updates')
+    #         if cursor.fetchone():
+    #             cursor.execute('UPDATE updates SET last_update_id = ? WHERE id = 1', (update_id,))
+    #         else:
+    #             cursor.execute('INSERT INTO updates (id, last_update_id) VALUES (1, ?)', (update_id,))
             
-            conn.commit()
-            conn.close()
-        except sqlite3.OperationalError as e:
-            logger.error(f"Error saving update_id: {e}")
+    #         conn.commit()
+    #         conn.close()
+    #     except sqlite3.OperationalError as e:
+    #         logger.error(f"Error saving update_id: {e}")
     
-    def load_last_update_id(self):
-        """Загрузка последнего обработанного update_id"""
-        try:
-            conn = sqlite3.connect('psych_bot.db', timeout=5)
-            cursor = conn.cursor()
+    # def load_last_update_id(self):
+    #     """Загрузка последнего обработанного update_id"""
+    #     try:
+    #         conn = sqlite3.connect('psych_bot.db', timeout=5)
+    #         cursor = conn.cursor()
             
-            cursor.execute('SELECT last_update_id FROM updates WHERE id = 1')
-            result = cursor.fetchone()
-            conn.close()
+    #         cursor.execute('SELECT last_update_id FROM updates WHERE id = 1')
+    #         result = cursor.fetchone()
+    #         conn.close()
             
-            if result:
-                # Устанавливаем последний update_id для polling
-                self.last_update_id = result[0]
-                return result[0]
-        except sqlite3.OperationalError as e:
-            logger.error(f"Error loading update_id: {e}")
-        return None
+    #         if result:
+    #             # Устанавливаем последний update_id для polling
+    #             self.last_update_id = result[0]
+    #             return result[0]
+    #     except sqlite3.OperationalError as e:
+    #         logger.error(f"Error loading update_id: {e}")
+    #     return None
     
     def save_user(self, telegram_id, full_name, user_group, faculty):
         """Сохранение пользователя в БД"""
@@ -215,16 +215,17 @@ class PsychBot:
     
     def setup_handlers(self):
         """Настройка обработчиков"""
-        # Команды
+        # Обработчики команд
         self.application.add_handler(CommandHandler("start", self.start))
         self.application.add_handler(CommandHandler("results", self.results))
         
-        # Callback обработчики
+        # Callback (обработчик нажатий на кнопки) обработчик
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
         
-        # Обработчики сообщений
+        # Обработчик сообщений
         self.application.add_handler(MessageHandler(
-            filters.TEXT & ~filters.COMMAND, self.handle_message
+            filters.TEXT & ~filters.COMMAND, self.handle_message #первый параметр говорит, что обработчик будет ловить все 
+            #текстовые сообщения (апдейты, являющиеся ими) кроме комманд
         ))
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -268,9 +269,9 @@ class PsychBot:
         if (data.startswith("admin_") or 
         data.startswith("avg_") or 
         data.startswith("all_") or 
-        data.startswith("raw_")):
+        data.startswith("raw_")) or data.startswith("fac_"):
             logger.info(f"→ Routing to admin handler")
-            await self.handle_admin_callback(query, context)
+            await self.handle_admin_callback(update, context)
         
         # Callback регистрации
         elif data.startswith("reg_"):
@@ -283,10 +284,11 @@ class PsychBot:
             await self.handle_test_callback(query, context)
         
         else:
-            logger.warning(f"⚠️ Unknown callback: {data}")
+            logger.warning(f"⚠️ Unknown callback (my main handler): {data}")
     
-    async def handle_admin_callback(self, query, context):
+    async def handle_admin_callback(self, update, context):
         """Обработка административных callback"""
+        query = update.callback_query
         data = query.data
         logger.info(f"📞 ADMIN CALLBACK: {data}")
         
@@ -300,10 +302,6 @@ class PsychBot:
             elif data == "admin_raw_results":
                 await self.admin_handler.show_admin_tests_menu(query, "raw")
             
-            elif data == "admin_back":
-                # Передаем query.message вместо query
-                await self.admin_handler.admin_start(query.message, context)
-            
             # Обработка выбора теста для средних значений
             elif data == "avg_aggression":
                 await self.admin_handler.show_faculty_selection(query, "aggression")
@@ -313,7 +311,7 @@ class PsychBot:
                 await self.admin_handler.show_all_averages(query, "aggression")
             
             elif data == "raw_aggression":
-                await self.admin_handler.show_raw_data_menu(query)
+                await self.admin_handler.show_raw_data_menu(update)
             
             # Обработка выбора факультета (новый формат: "fac_1_agg" или "fac_1_raw")
             elif data.startswith("fac_"):
@@ -333,25 +331,31 @@ class PsychBot:
                         # Для сырых данных: получаем название по коду
                         faculty_name = self.admin_handler.code_to_faculty.get(faculty_code)
                         if faculty_name:
-                            await self.admin_handler.show_raw_data(query, "faculty", faculty=faculty_name)
+                            await self.admin_handler.show_raw_data(update, faculty=faculty_name)
                         else:
                             await query.message.reply_text("❌ Факультет не найден")
             
             # Обработка сырых данных меню
             elif data == "raw_single":
-                await self.admin_handler.request_student_name(query)
+                # Для получения сырых данных одного человека
+                logger.warning(f"⚠️ INSIDE RAW SINGLE CONDITION")
                 context.user_data['awaiting_name'] = True
+                await query.message.reply_text(
+            "Введите, пожалуйста, ФИО интересующего студента (например: Иванов Иван Иванович):"
+        )
             
             elif data == "raw_faculty":
+                logger.warning(f"⚠️ INSIDE RAW FACULTY CONDITION")
                 # Для сырых данных показываем выбор факультета
                 await self.admin_handler.show_faculty_selection(query, "raw")
             
             elif data == "raw_all":
-                # Все факультеты для сырых данных
-                await self.admin_handler.show_raw_data(query, "all")
+                logger.warning(f"⚠️ INSIDE RAW ALL FACULTY CONDITION")
+                #для сырых данных всех факультетов
+                await self.admin_handler.show_raw_data(update)
             
             else:
-                logger.warning(f"⚠️ Unknown admin callback: {data}")
+                logger.warning(f"⚠️ Unknown admin callback (by admin_handler): {data}")
                 await query.message.reply_text("❌ Неизвестная команда")
         
         except Exception as e:
@@ -463,12 +467,12 @@ class PsychBot:
         
         # Проверка ожидания имени студента для админской части
         if 'awaiting_name' in context.user_data and context.user_data['awaiting_name']:
+            context.user_data['awaiting_name'] = False #убираем флажок ожидания имени из контекста пользователя
+            #после предоставления ему данных о результатах конкретного студента
             await self.admin_handler.show_raw_data(
-                update,  # Передаем update вместо query
-                "single",
+                update,
                 student_name=text
             )
-            context.user_data['awaiting_name'] = False
             return
     
     async def handle_registration_step(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
@@ -581,7 +585,7 @@ class PsychBot:
         
         return scores
     
-    async def finish_test(self, user, context):  # ← ИЗМЕНИТЕ СИГНАТУРУ!
+    async def finish_test(self, user, context):  
         """Завершение теста и сохранение результатов"""
         try:
             tg_id = user.id  #тг id пользователя 
@@ -600,7 +604,7 @@ class PsychBot:
             # Расчет результатов
             scores = self.calculate_scores(answers)
             
-            # Сохраняем пользователя БЕЗ username
+           
             user_saved = self.save_user(
                 telegram_id=tg_id,
                 full_name=context.user_data['full_name'],
@@ -626,14 +630,14 @@ class PsychBot:
             else:
                 await context.bot.send_message(
                     chat_id=tg_id,
-                    text="Произошла ошибка при сохранении результатов. Пожалуйста, обратитесь к администратору."
+                    text="Произошла ошибка при сохранении результатов. "
                 )
         
         except Exception as e:
             logger.error(f"Ошибка при завершении теста: {e}")
             await context.bot.send_message(
                 chat_id=tg_id,
-                text="Произошла непредвиденная ошибка. Обратитесь к администратору."
+                text="Произошла непредвиденная ошибка."
             )
         
         finally:

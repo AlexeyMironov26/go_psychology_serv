@@ -6,7 +6,7 @@ import logging
 
 
 
-ADMIN_IDS = [475439608, 1489252140, 6155787421]
+ADMIN_IDS = [475439608, 1489252140, 1461136014] 
 
 class AdminHandler:
     # Словарь кодов факультетов
@@ -361,6 +361,7 @@ class AdminHandler:
         norms_text += "Результаты:\n\n"
         
         # Формируем данные
+        data_text=""
         for row in results: 
             full_name, group, faculty, completed_at, *scales = row
             aggression_idx = scales[-2]

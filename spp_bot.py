@@ -372,7 +372,8 @@ class PsychBot:
                 "reg_faculty_radio": "Радио и Телевидение",
                 "reg_faculty_it": "Информационные Технологии",
                 "reg_faculty_networks": "Сети и Системы Связи",
-                "reg_faculty_cyber": "Кибернетика и Информационная Безопасность"
+                "reg_faculty_cyber": "Кибернетика и Информационная Безопасность",
+                "reg_faculty_digEco": "Цифровая экономика и массовые коммуникации"
             }
             
             if data in faculty_map:
@@ -487,7 +488,8 @@ class PsychBot:
                 [InlineKeyboardButton("Радио и Телевидение", callback_data="reg_faculty_radio")],
                 [InlineKeyboardButton("Информационные Технологии", callback_data="reg_faculty_it")],
                 [InlineKeyboardButton("Сети и Системы Связи", callback_data="reg_faculty_networks")],
-                [InlineKeyboardButton("Кибернетика и Информационная Безопасность", callback_data="reg_faculty_cyber")]
+                [InlineKeyboardButton("Кибернетика и Информационная Безопасность", callback_data="reg_faculty_cyber")],
+                [InlineKeyboardButton("Цифровая экономика и массовые коммуникации", callback_data="reg_faculty_digEco")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
@@ -498,7 +500,6 @@ class PsychBot:
             context.user_data['registration_step'] = 'ask_faculty'
         
         elif step == 'ask_group':
-            # ИСПРАВЛЕННАЯ ПРОВЕРКА ФОРМАТА ГРУППЫ
             text = text.upper()  # Приводим к верхнему регистру
             
             # Простая проверка - группа должна содержать хотя бы одну русскую букву и одну цифру

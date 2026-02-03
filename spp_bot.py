@@ -89,41 +89,6 @@ class PsychBot:
             logger.error(f"Database initialization error: {e}")
             raise
     
-    # def save_last_update_id(self, update_id):
-    #     """Сохранение последнего обработанного update_id"""
-    #     try:
-    #         conn = sqlite3.connect('psych_bot.db', timeout=5)
-    #         cursor = conn.cursor()
-            
-    #         cursor.execute('SELECT id FROM updates')
-    #         if cursor.fetchone():
-    #             cursor.execute('UPDATE updates SET last_update_id = ? WHERE id = 1', (update_id,))
-    #         else:
-    #             cursor.execute('INSERT INTO updates (id, last_update_id) VALUES (1, ?)', (update_id,))
-            
-    #         conn.commit()
-    #         conn.close()
-    #     except sqlite3.OperationalError as e:
-    #         logger.error(f"Error saving update_id: {e}")
-    
-    # def load_last_update_id(self):
-    #     """Загрузка последнего обработанного update_id"""
-    #     try:
-    #         conn = sqlite3.connect('psych_bot.db', timeout=5)
-    #         cursor = conn.cursor()
-            
-    #         cursor.execute('SELECT last_update_id FROM updates WHERE id = 1')
-    #         result = cursor.fetchone()
-    #         conn.close()
-            
-    #         if result:
-    #             # Устанавливаем последний update_id для polling
-    #             self.last_update_id = result[0]
-    #             return result[0]
-    #     except sqlite3.OperationalError as e:
-    #         logger.error(f"Error loading update_id: {e}")
-    #     return None
-    
     def save_user(self, telegram_id, full_name, user_group, faculty):
         """Сохранение пользователя в БД"""
         try:

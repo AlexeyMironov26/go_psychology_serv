@@ -3,6 +3,10 @@ import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 import logging
+import pandas as pd
+from io import BytesIO
+import datetime
+import openpyxl  
 
 
 
@@ -325,90 +329,141 @@ class AdminHandler:
         cursor.execute(query, params)
         results = cursor.fetchall()
         conn.close()
-        
         return results
     
+    def create_excel_from_results(self, results, faculty=None, student_name=None, logger=None):
+        """Создает Excel файл из результатов"""
+        if not results:
+            return None
+        
+        try:
+            # Названия колонок (должны совпадать с порядком в results)
+            columns = [
+                'ФИО', 
+                'Группа', 
+                'Факультет', 
+                'Дата тестирования',
+                'Физическая агрессия', 
+                'Косвенная агрессия', 
+                'Раздражение',
+                'Негативизм', 
+                'Обида', 
+                'Подозрительность', 
+                'Вербальная агрессия', 
+                'Чувство вины',
+                'Индекс агрессивности', 
+                'Индекс враждебности'
+            ]
+            
+            # Создаем DataFrame
+            df = pd.DataFrame(results, columns=columns)
+            
+            # Создаем Excel в памяти
+            excel_buffer = BytesIO()
+            
+            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                df.to_excel(writer, sheet_name='Результаты тестов', index=False)
+                
+                # Получаем лист для форматирования
+                worksheet = writer.sheets['Результаты тестов']
+                
+                # Автоматическая ширина колонок
+                for column in worksheet.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter
+                    for cell in column:
+                        try:
+                            if cell.value:
+                                cell_length = len(str(cell.value))
+                                if cell_length > max_length:
+                                    max_length = cell_length
+                        except:
+                            pass
+                    adjusted_width = min(max_length + 2, 50)
+                    worksheet.column_dimensions[column_letter].width = adjusted_width
+            
+            excel_buffer.seek(0)
+            return excel_buffer
+            
+        except Exception as e:
+            logger.error(f"Ошибка создания Excel: {e}")
+            return None
+        
     async def show_raw_data(self, update, faculty=None, student_name=None):
-        """Показать сырые данные"""
-        query=update.callback_query
-
+        """Показать сырые данные в Excel файле"""
         logger1 = logging.getLogger(__name__)
-        logger1.warning("RAW DATA WORKS")
-
+        
         # Извлекаем message из update
         if update.callback_query:
-            damessage = update.callback_query.message
-            # Подтверждаем нажатие кнопки (если это callback)
+            message = update.callback_query.message
             await update.callback_query.answer()
         elif update.message:
-            damessage = update.message
+            message = update.message
         else:
             logger1.error("Не удалось извлечь сообщение из Update")
             return
         
+        # Получаем данные
         results = self.get_raw_data(student_name=student_name, faculty=faculty)
         
         if not results:
             if student_name:
-                await damessage.reply_text("Извините, но такой студент не проходил тест")
+                await message.reply_text(f"Студент '{student_name}' не найден")
             else:
-                await damessage.reply_text("Нет данных по выбранному критерию")
+                await message.reply_text("Нет данных по выбранному критерию")
             return
         
-        # Нормы в начале сообщения
-        norms_text = "Нормы индексов:\n"
-        norms_text += "• Агрессивность: 21 ± 4 (17-25)\n"
-        norms_text += "• Враждебность: 6.5-7 ± 3 (3.5-10)\n\n"
-        norms_text += "Результаты:\n\n"
+        # Сообщаем о начале обработки
+        status_msg = await message.reply_text(
+            f"📊 Найдено {len(results)} записей\n"
+            f"🔄 Создаю Excel файл..."
+        )
         
-        # Формируем данные
-        data_text=""
-        for row in results: 
-            full_name, group, faculty, completed_at, *scales = row
-            aggression_idx = scales[-2]
-            hostility_idx = scales[-1]
-            
-            # Проверка норм
-            aggression_norm = "✅" if 17 <= aggression_idx <= 25 else "❌"
-            hostility_norm = "✅" if 3.5 <= hostility_idx <= 10 else "❌"
-            scale_names=["Физическая агрессия",
-                            "Косвенная агрессия",
-                            "Раздражение",
-                            "Негативизм",
-                            "Обида",
-                            "Подозрительность",
-                            "Вербальная агрессия",
-                            "Угрызения совести, чувство вины"]
-            
-            scale_max_pts={"Физическая агрессия": 10,
-                            "Косвенная агрессия": 9,
-                            "Раздражение": 11,
-                            "Негативизм": 5,
-                            "Обида": 8,
-                            "Подозрительность": 10,
-                            "Вербальная агрессия": 12,
-                            "Угрызения совести, чувство вины": 9}
-            
-            data_text += f"👤 {full_name}\n"
-            data_text += f"   Группа: {group}\n"
-            data_text += f"   Факультет: {faculty}\n"
-            data_text += f"   Дата прохождения теста: {completed_at}\n"
-            
-            for idx in range(len(scale_names)):
-                data_text += f"   {scale_names[idx]}: {str(scales[idx])}/{str(scale_max_pts[scale_names[idx]])}\n"
-            data_text += f"   Агрессивность: {aggression_idx} {aggression_norm}\n"
-            data_text += f"   Враждебность: {hostility_idx} {hostility_norm}\n"
-            data_text += "-" * 50 + "\n"
+        # Создаем Excel файл
+        excel_buffer = self.create_excel_from_results(results, faculty, student_name, logger1)
         
-        # Разбиваем на несколько сообщений если нужно
-        full_text = norms_text + data_text
+        if not excel_buffer:
+            await message.reply_text("❌ Ошибка при создании файла")
+            return
         
-        if len(full_text) > 4000:
-            chunks = [full_text[i:i+4000] for i in range(0, len(full_text), 4000)]
-            for chunk in chunks:
-                await damessage.reply_text(chunk)
+        # Формируем имя файла
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+        
+        if student_name:
+            # Очищаем имя для файла
+            clean_name = ''.join(c for c in student_name if c.isalnum() or c in (' ', '-', '_'))
+            filename = f"данные_{clean_name}_{timestamp}.xlsx"
+            caption = f"📊 Данные студента: {student_name}\n📁 Записей: {len(results)}"
+            
+        elif faculty:
+            clean_faculty = ''.join(c for c in faculty if c.isalnum() or c in (' ', '-', '_'))
+            filename = f"данные_{clean_faculty}_{timestamp}.xlsx"
+            caption = f"📊 Данные факультета: {faculty}\n📁 Записей: {len(results)}"
+            
         else:
-            await damessage.reply_text(full_text) #если символов в тексте меньше 4000 тысяч, 
-            #то отправляем одним сообщением
+            filename = f"все_данные_{timestamp}.xlsx"
+            caption = f"📊 Все данные\n📁 Записей: {len(results)}"
+
+        caption+=f"\n    Максимальные значения шкал: \nФизическая агрессия: 10,\
+                            \nКосвенная агрессия: 9\
+                            \nРаздражение: 11\
+                            \nНегативизм: 5\
+                            \nОбида: 8\
+                            \nПодозрительность: 10\
+                            \nВербальная агрессия: 12\
+                            \nУгрызения совести, чувство вины: 9\
+        \n\n    Норма агрессивности: 17-25\
+        \n    Норма враждебности: 3.5-10"
         
-        # await self.admin_start(query.message, None)
+        # Удаляем статус сообщение
+        try:
+            await status_msg.delete()
+        except:
+            pass
+        
+        # Отправляем файл
+        await message.reply_document(
+            document=excel_buffer,
+            filename=filename,
+            caption=caption
+        )

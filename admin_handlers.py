@@ -21,7 +21,11 @@ class AdminHandler:
             "Кибернетика и Информационная Безопасность": "4",
             "Цифровая экономика и массовые коммуникации": "5"
         }
+    
     code_to_faculty = {v: k for k, v in faculty_codes.items()}
+
+    valid_test_types = ["agg"]
+
     def __init__(self, db_path='psych_bot.db'):
         self.db_path = db_path
     
@@ -95,7 +99,7 @@ class AdminHandler:
         keyboard = []
         for faculty_name, faculty_code in self.faculty_codes.items():
             #callback_data: "fac_1_agg"
-            callback_data = f"fac_{faculty_code}_{test_type[:3]}"  # test_type[:3] = "agg" для aggression
+            callback_data = f"fac_{faculty_code}_{test_type[:3]}" 
             
             keyboard.append([InlineKeyboardButton(faculty_name, callback_data=callback_data)])
         
@@ -163,7 +167,7 @@ class AdminHandler:
             # Если mapping не найден, используем код
             faculty_name = f"Факультет {faculty_code}"
         
-        if test_type != "agg":  # Проверяем сокращенный тип теста
+        if test_type not in self.valid_test_types:  # Проверяем сокращенный тип теста
             await query.message.reply_text("Тест пока не реализован")
             return
         

@@ -190,7 +190,7 @@ def interpret_eysenck(scores: dict) -> str:
     else: 
         result += "У вас смешанный тип темперамента"
     
-    result = f"По результатам прохождения теста вы {e_label} {n_label}."
+    result += f"\n\nПо результатам прохождения теста вы {e_label} {n_label}."
 
     if lie >= 6:
         result += "\n\n⚠️ Возможно, вы были неискренны в своих ответах."

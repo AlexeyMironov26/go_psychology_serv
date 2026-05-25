@@ -2,7 +2,7 @@ import json
 import sqlite3 # норма враждебности 3.5-10
 import logging # норма агрессивности 17-25
 import os
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, 
@@ -35,7 +35,7 @@ class PsychBot:
         connect_timeout=30.0,   
         read_timeout=10.0 )
         #.request(request)\
-        
+
         #workers = (os.cpu_count() or 4) + 2
         self.application = Application.builder()\
             .token(self.token)\
@@ -205,13 +205,15 @@ class PsychBot:
             user_id = user[0]
             
             # Сохраняем результаты вместе со snapshot данных пользователя
+            moscow_tz = timezone(timedelta(hours=3))
+            now_moscow = datetime.now(moscow_tz).strftime('%Y-%m-%d %H:%M:%S')
             cursor.execute('''
                 INSERT INTO aggression_test_results 
                 (user_id, snapshot_full_name, snapshot_user_group, snapshot_faculty,
                 physical_aggression, indirect_aggression, irritation,
                 negativism, resentment, suspicion, verbal_aggression, guilt,
-                aggression_index, hostility_index)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                aggression_index, hostility_index, completed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 user_id,
                 snapshot_name,
@@ -226,7 +228,8 @@ class PsychBot:
                 scores['verbal_aggression'],
                 scores['guilt'],
                 scores['aggression_index'],
-                scores['hostility_index']
+                scores['hostility_index'],
+                now_moscow
             ))
             
             conn.commit()

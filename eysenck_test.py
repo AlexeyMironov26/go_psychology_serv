@@ -1,5 +1,7 @@
 import sqlite3
 import logging
+from datetime import datetime, timezone, timedelta
+
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +23,7 @@ EYSENCK_QUESTIONS = [
     "Бывает ли когда-нибудь, что разозлившись, вы выходите из себя?",
     "Часто ли бывает, что вы действуете необдуманно, под влиянием момента?",
     "Часто ли вас беспокоит мысль о том, что вам не следовало что-нибудь делать или говорить?",
-    "Предпочитаете ли вы чтение книг встречами с людьми?",
+    "Предпочитаете ли вы чтение книг встречам с людьми?",
     "Верно ли, что вас легко задеть?",
     "Любите ли вы часто бывать в компании?",
     "Бывают ли у вас такие мысли, которыми вам бы не хотелось делиться с другими?",
@@ -167,11 +169,14 @@ def save_eysenck_result(db_path: str, telegram_id: int, scores: dict,
 
         user_id = user[0]
 
+        moscow_tz = timezone(timedelta(hours=3))
+        now_moscow = datetime.now(moscow_tz).strftime('%Y-%m-%d %H:%M:%S')
+
         cursor.execute('''
             INSERT INTO eysenck_test_results
             (user_id, snapshot_full_name, snapshot_user_group, snapshot_faculty,
-             extraversion, neuroticism, lie)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+             extraversion, neuroticism, lie, completed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             user_id,
             snapshot_name,
@@ -180,6 +185,7 @@ def save_eysenck_result(db_path: str, telegram_id: int, scores: dict,
             scores['extraversion'],
             scores['neuroticism'],
             scores['lie'],
+            now_moscow
         ))
 
         conn.commit()

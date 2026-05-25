@@ -9,10 +9,6 @@ from telegram.ext import (
     ContextTypes, MessageHandler, filters
 )
 from admin_handlers import AdminHandler
-from eysenck_test import (
-    EYSENCK_QUESTIONS, calculate_eysenck_scores,
-    interpret_eysenck, save_eysenck_result
-)
 
 # Настройка логирования
 logging.basicConfig(
@@ -96,23 +92,6 @@ class PsychBot:
                     cursor.execute(f'ALTER TABLE aggression_test_results ADD COLUMN {col} TEXT')
                 except sqlite3.OperationalError:
                     pass  # колонка уже существует
-
-            # Таблица результатов теста Айзенка
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS eysenck_test_results (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
-                    test_name TEXT DEFAULT 'Опросник Айзенка по определению типа темперамента',
-                    snapshot_full_name TEXT,
-                    snapshot_user_group TEXT,
-                    snapshot_faculty TEXT,
-                    extraversion INTEGER,
-                    neuroticism INTEGER,
-                    lie INTEGER,
-                    completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users (id)
-                )
-            ''')
             
             conn.commit()
             conn.close()
@@ -273,11 +252,6 @@ class PsychBot:
                     "Тест на исследование уровня агрессивности",
                     callback_data="test_start_aggression"
                 )
-            ], [
-                InlineKeyboardButton(
-                    "Опросник по определению типа темперамента",
-                    callback_data="test_start_eysenck"
-                )
             ]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
@@ -349,6 +323,7 @@ class PsychBot:
         data.startswith("raw_")) or data.startswith("fac_"):
             logger.info(f"→ Routing to admin handler")
             await self.handle_admin_callback(update, context)
+        
         # Callback регистрации
         elif data.startswith("reg_"):
             logger.info(f"→ Routing to registration handler")
@@ -378,100 +353,56 @@ class PsychBot:
             elif data == "admin_raw_results":
                 await self.admin_handler.show_admin_tests_menu(query, "raw")
             
-            # ── Средние по агрессии ──────────────────────────────────
+            # Обработка выбора теста для средних значений
             elif data == "avg_aggression":
                 await self.admin_handler.show_faculty_selection(query, "aggression")
             
             elif data == "all_aggression":
+                # Для всех факультетов передаем None вместо конкретного факультета
                 await self.admin_handler.show_all_averages(query, "aggression")
             
             elif data == "raw_aggression":
-                await self.admin_handler.show_raw_data_menu(update, test_type='aggression')
+                await self.admin_handler.show_raw_data_menu(update)
             
-            # ── Средние по Айзенку ───────────────────────────────────
-            elif data == "avg_eysenck":
-                await self.admin_handler.show_faculty_selection(query, "eysenck")
-            
-            elif data == "all_eysenck":
-                await self.admin_handler.show_all_averages(query, "eysenck")
-            
-            elif data == "raw_eysenck":
-                await self.admin_handler.show_raw_data_menu(update, test_type='eysenck')
-            
-            # ── Выбор факультета ─────────────────────────────────────
+            # Обработка выбора факультета (новый формат: "fac_1_agg" или "fac_1_raw")
             elif data.startswith("fac_"):
                 parts = data.split("_")
                 logger.info(f"📊 Faculty callback parts: {parts}")
                 
                 if len(parts) >= 3:
-                    faculty_code = parts[1]
-                    test_type = parts[2]  # "agg", "eye", "raw"
+                    faculty_code = parts[1]  # "1", "2", "3", "4" - КОД факультета
+                    test_type = parts[2]     # "agg" или "raw"
                     
-                    if test_type in ("agg", "eye"):
+                    if test_type == "agg":
+                        # Передаем КОД факультета в show_faculty_averages
+                        # Метод сам преобразует код в название
                         await self.admin_handler.show_faculty_averages(query, faculty_code, test_type)
                     
                     elif test_type == "raw":
+                        # Для сырых данных: получаем название по коду
                         faculty_name = self.admin_handler.code_to_faculty.get(faculty_code)
                         if faculty_name:
                             await self.admin_handler.show_raw_data(update, faculty=faculty_name)
                         else:
                             await query.message.reply_text("❌ Факультет не найден")
-                    
-                    # raw по Айзенку: fac_1_eyr (eye+raw)
-                    elif test_type == "eyr":
-                        faculty_name = self.admin_handler.code_to_faculty.get(faculty_code)
-                        if faculty_name:
-                            await self.admin_handler.show_eysenck_raw_data(update, faculty=faculty_name)
-                        else:
-                            await query.message.reply_text("❌ Факультет не найден")
             
-            # ── Сырые данные агрессии ─────────────────────────────────
-            elif data == "raw_single_agg":
-                context.user_data['awaiting_name'] = True
-                context.user_data['awaiting_test_type'] = 'aggression'
-                await query.message.reply_text(
-                    "Введите, пожалуйста, ФИО интересующего студента (например: Иванов Иван Иванович):"
-                )
-            
-            elif data == "raw_faculty_agg":
-                await self.admin_handler.show_faculty_selection(query, "raw")
-            
-            elif data == "raw_all_agg":
-                await self.admin_handler.show_raw_data(update)
-            
-            # ── Сырые данные Айзенка ──────────────────────────────────
-            elif data == "raw_single_eye":
-                context.user_data['awaiting_name'] = True
-                context.user_data['awaiting_test_type'] = 'eysenck'
-                await query.message.reply_text(
-                    "Введите, пожалуйста, ФИО интересующего студента (например: Иванов Иван Иванович):"
-                )
-            
-            elif data == "raw_faculty_eye":
-                # Для выбора факультета по Айзенку используем суффикс eyr
-                keyboard = []
-                for fname, fcode in self.admin_handler.faculty_codes.items():
-                    keyboard.append([InlineKeyboardButton(fname, callback_data=f"fac_{fcode}_eyr")])
-                await query.edit_message_text(
-                    "Выберите факультет:",
-                    reply_markup=InlineKeyboardMarkup(keyboard)
-                )
-            
-            elif data == "raw_all_eye":
-                await self.admin_handler.show_eysenck_raw_data(update)
-            
-            # ── Обратная совместимость со старыми callback без суффикса ─
+            # Обработка сырых данных меню
             elif data == "raw_single":
+                # Для получения сырых данных одного человека
+                logger.warning(f"⚠️ INSIDE RAW SINGLE CONDITION")
                 context.user_data['awaiting_name'] = True
-                context.user_data['awaiting_test_type'] = 'aggression'
                 await query.message.reply_text(
-                    "Введите, пожалуйста, ФИО интересующего студента (например: Иванов Иван Иванович):"
-                )
+            "Введите, пожалуйста, ФИО интересующего студента (например: Иванов Иван Иванович):"
+        )
             
             elif data == "raw_faculty":
+                logger.warning(f"⚠️ INSIDE RAW FACULTY CONDITION")
+                # Для сырых данных показываем выбор факультета
                 await self.admin_handler.show_faculty_selection(query, "raw")
             
             elif data == "raw_all":
+                logger.warning(f"⚠️ INSIDE RAW ALL FACULTY CONDITION")
+                #для сырых данных всех факультетов
                 await self.admin_handler.show_raw_data(update)
             
             else:
@@ -524,11 +455,6 @@ class PsychBot:
                         "Тест на исследование уровня агрессивности",
                         callback_data="test_start_aggression"
                     )
-                ], [
-                    InlineKeyboardButton(
-                        "Опросник по определению типа темперамента",
-                        callback_data="test_start_eysenck"
-                    )
                 ]]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 await query.edit_message_text(
@@ -562,11 +488,6 @@ class PsychBot:
                     "Тест на исследование уровня агрессивности", 
                     callback_data="test_start_aggression"
                 )
-            ], [
-                InlineKeyboardButton(
-                    "Опросник по определению типа темперамента",
-                    callback_data="test_start_eysenck"
-                )
             ]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
@@ -580,53 +501,40 @@ class PsychBot:
         data = query.data
         
         if data == "test_start_aggression":
-            # Начинаем тест на агрессию
+            # Начинаем тест
             context.user_data['test_answers'] = []
             context.user_data['current_question'] = 0
             context.user_data['test_type'] = 'aggression'
+            
+            # Редактируем сообщение с выбором теста на первый вопрос
             await self.send_question(query, context)
-
-        elif data == "test_start_eysenck":
-            # Начинаем тест Айзенка — сначала показываем инструкцию
-            context.user_data['test_answers'] = []
-            context.user_data['current_question'] = 0
-            context.user_data['test_type'] = 'eysenck'
-
-            keyboard = [[InlineKeyboardButton("Начать", callback_data="answer_eysenck_start")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text(
-                "Вам предлагается несколько вопросов. На каждый вопрос отвечайте только «да» или «нет». "
-                "Не тратьте время на обсуждение вопросов, здесь не может быть хороших или плохих ответов, "
-                "т.к. это не испытание умственных способностей.",
-                reply_markup=reply_markup
-            )
         
         elif data.startswith("answer_"):
-            if data == "answer_eysenck_start":
-                # Показываем первый вопрос теста Айзенка
-                await self.send_question(query, context)
-                return
-
-            # Обработка ответа (да/нет) — общая для обоих тестов
+            # Обработка ответа
             answer = 1 if "yes" in data else 0
             current_question = context.user_data['current_question']
             
+            # Сохраняем ответ
             context.user_data['test_answers'].append({
                 'question_number': current_question + 1,
                 'answer': answer
             })
+            
+            # Переходим к следующему вопросу
             context.user_data['current_question'] += 1
-
-            test_type = context.user_data.get('test_type', 'aggression')
-            total_questions = len(EYSENCK_QUESTIONS) if test_type == 'eysenck' else len(self.questions)
-
-            if context.user_data['current_question'] < total_questions:
+            
+            # Проверяем, закончились ли вопросы
+            if context.user_data['current_question'] < len(self.questions):
+                # Редактируем текущее сообщение на следующий вопрос
                 await self.send_question(query, context)
             else:
+                # Все вопросы отвечены - завершаем тест
                 await query.edit_message_text(
                     "Поздравляем, вы завершили прохождение психологического теста! 🎉\n\n"
                     "Пожалуйста, дождитесь сохранения ваших результатов"
                 )
+                
+                # Вызываем функцию сохранения
                 await self.finish_test(query.from_user, context)
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -641,12 +549,12 @@ class PsychBot:
         
         # Проверка ожидания имени студента для админской части
         if 'awaiting_name' in context.user_data and context.user_data['awaiting_name']:
-            context.user_data['awaiting_name'] = False
-            test_type = context.user_data.pop('awaiting_test_type', 'aggression')
-            if test_type == 'eysenck':
-                await self.admin_handler.show_eysenck_raw_data(update, student_name=text)
-            else:
-                await self.admin_handler.show_raw_data(update, student_name=text)
+            context.user_data['awaiting_name'] = False #убираем флажок ожидания имени из контекста пользователя
+            #после предоставления ему данных о результатах конкретного студента
+            await self.admin_handler.show_raw_data(
+                update,
+                student_name=text
+            )
             return
     
     async def handle_registration_step(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
@@ -706,14 +614,7 @@ class PsychBot:
     async def send_question(self, query, context):
         """Отправка/редактирование вопроса теста"""
         current_question = context.user_data['current_question']
-        test_type = context.user_data.get('test_type', 'aggression')
-
-        if test_type == 'eysenck':
-            question_text = EYSENCK_QUESTIONS[current_question]
-            total = len(EYSENCK_QUESTIONS)
-        else:
-            question_text = self.questions[current_question]
-            total = len(self.questions)
+        question_text = self.questions[current_question]
         
         keyboard = [
             [InlineKeyboardButton("✅ Да", callback_data="answer_yes")],
@@ -721,8 +622,9 @@ class PsychBot:
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        progress = f"Вопрос {current_question + 1}/{total}"
+        progress = f"Вопрос {current_question + 1}/{len(self.questions)}"
         
+        # Всегда редактируем текущее сообщение
         await query.edit_message_text(
             f"{progress}\n\n{question_text}",
             reply_markup=reply_markup
@@ -770,7 +672,6 @@ class PsychBot:
         tg_id = user.id
         try:
             answers = context.user_data['test_answers']
-            test_type = context.user_data.get('test_type', 'aggression')
             
             # Проверяем, есть ли данные пользователя
             if not all(key in context.user_data for key in ['full_name', 'group', 'faculty']):
@@ -784,48 +685,25 @@ class PsychBot:
             snapshot_group = context.user_data['group']
             snapshot_faculty = context.user_data['faculty']
 
-            # Убеждаемся, что пользователь сохранён в БД
+            # Расчет результатов
+            scores = self.calculate_scores(answers)
+            
+            # Убеждаемся, что пользователь сохранён в БД (на случай первого прохождения)
             user_saved = self.save_user(
                 telegram_id=tg_id,
                 full_name=snapshot_name,
                 user_group=snapshot_group,
                 faculty=snapshot_faculty
             )
+            
             if not user_saved:
                 await context.bot.send_message(
                     chat_id=tg_id,
                     text="Ошибка при сохранении данных пользователя."
                 )
                 return
-
-            # ── Тест Айзенка ──────────────────────────────────────────
-            if test_type == 'eysenck':
-                scores = calculate_eysenck_scores(answers)
-                success = save_eysenck_result(
-                    db_path='psych_bot.db',
-                    telegram_id=tg_id,
-                    scores=scores,
-                    snapshot_name=snapshot_name,
-                    snapshot_group=snapshot_group,
-                    snapshot_faculty=snapshot_faculty
-                )
-                if success:
-                    interpretation = interpret_eysenck(scores)
-                    result_text = (
-                        "✅ Ваши результаты сохранены!\n\n"
-                        f"📊 {interpretation}\n\n"
-                        "Результаты будут доступны психологической службе МТУСИ."
-                    )
-                    await context.bot.send_message(chat_id=tg_id, text=result_text)
-                else:
-                    await context.bot.send_message(
-                        chat_id=tg_id,
-                        text="Произошла ошибка при сохранении результатов."
-                    )
-                return
-
-            # ── Тест на агрессию ──────────────────────────────────────
-            scores = self.calculate_scores(answers)
+            
+            # Сохранение результатов теста в БД (с snapshot)
             success = self.save_test_result(
                 tg_id, scores,
                 snapshot_name=snapshot_name,
@@ -834,6 +712,7 @@ class PsychBot:
             )
             
             if success:
+                # Формируем читаемый результат для пользователя
                 scale_names = {
                     'physical_aggression': 'Физическая агрессия',
                     'indirect_aggression': 'Косвенная агрессия',
@@ -899,6 +778,7 @@ class PsychBot:
             )
         
         finally:
+            # Очищаем данные пользователя
             for key in ['test_answers', 'current_question', 'test_type', 
                         'full_name', 'group', 'faculty', 'registration_step']:
                 context.user_data.pop(key, None)

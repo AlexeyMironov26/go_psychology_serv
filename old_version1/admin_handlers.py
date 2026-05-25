@@ -24,7 +24,7 @@ class AdminHandler:
     
     code_to_faculty = {v: k for k, v in faculty_codes.items()}
 
-    valid_test_types = ["agg", "eye"]
+    valid_test_types = ["agg"]
 
     def __init__(self, db_path='psych_bot.db'):
         self.db_path = db_path
@@ -73,19 +73,19 @@ class AdminHandler:
     
     async def show_admin_tests_menu(self, query, action_type):
         """Меню выбора теста для админских функций"""
+        # Упрощаем callback_data
         if action_type == "faculty_avg":
-            agg_cb = "avg_aggression"
-            eye_cb = "avg_eysenck"
+            callback_data = "avg_aggression"  # Было: "faculty_avg_aggression"
         elif action_type == "all_avg":
-            agg_cb = "all_aggression"
-            eye_cb = "all_eysenck"
-        else:  # raw
-            agg_cb = "raw_aggression"
-            eye_cb = "raw_eysenck"
-
+            callback_data = "all_aggression"  # Было: "all_avg_aggression"
+        elif action_type == "raw":
+            callback_data = "raw_aggression"  # Было: "raw_aggression" (уже короткий)
+        else:
+            callback_data = "avg_aggression"
+        
         keyboard = [
-            [InlineKeyboardButton("Опросник исследования уровня агрессивности", callback_data=agg_cb)],
-            [InlineKeyboardButton("Опросник Айзенка (тип темперамента)", callback_data=eye_cb)],
+            [InlineKeyboardButton("Опросник исследования уровня агрессивности", 
+                                callback_data=callback_data)],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -95,15 +95,12 @@ class AdminHandler:
         )
 
     async def show_faculty_selection(self, query, test_type):
-        """Выбор факультета. test_type: 'aggression', 'eysenck', 'raw'"""
+        """Выбор факультета"""
         keyboard = []
         for faculty_name, faculty_code in self.faculty_codes.items():
-            # aggression -> agg, eysenck -> eye, raw -> raw
-            if test_type == 'eysenck':
-                suffix = 'eye'
-            else:
-                suffix = test_type[:3]
-            callback_data = f"fac_{faculty_code}_{suffix}"
+            #callback_data: "fac_1_agg"
+            callback_data = f"fac_{faculty_code}_{test_type[:3]}" 
+            
             keyboard.append([InlineKeyboardButton(faculty_name, callback_data=callback_data)])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -163,28 +160,24 @@ class AdminHandler:
     
     async def show_faculty_averages(self, query, faculty_code, test_type):
         """Показать средние значения по факультету"""
-        faculty_name = self.code_to_faculty.get(faculty_code)
+        # Получаем оригинальное название факультета по коду
+        faculty_name = self.code_to_faculty.get(faculty_code)  
+        
         if not faculty_name:
+            # Если mapping не найден, используем код
             faculty_name = f"Факультет {faculty_code}"
         
-        if test_type == "eye":
-            await self._show_eysenck_averages(query, faculty_name)
-        elif test_type == "agg":
-            await self._show_aggression_averages(query, faculty_name)
-        else:
+        if test_type not in self.valid_test_types:  # Проверяем сокращенный тип теста
             await query.message.reply_text("Тест пока не реализован")
-
-    async def _show_aggression_averages(self, query, faculty_name=None):
-        """Вывод средних по тесту агрессии"""
-        averages = self.get_faculty_averages(faculty_name)
-        
-        if not averages:
-            label = f"факультету '{faculty_name}'" if faculty_name else "всем факультетам"
-            await query.message.reply_text(f"Нет данных по {label}")
             return
         
-        label = f"факультета '{faculty_name}'" if faculty_name else "всех факультетов"
-        text = f"📊 Средние значения для {label}:\n\n"
+        averages = self.get_faculty_averages(faculty_name)  # Используем полное название
+        
+        if not averages:
+            await query.message.reply_text("Нет данных по выбранному факультету")
+            return
+        
+        text = f"📊 Средние значения для факультета '{faculty_name}':\n\n"
         
         scale_names = {
             'physical_aggression': 'Физическая агрессия',
@@ -196,11 +189,14 @@ class AdminHandler:
             'verbal_aggression': 'Вербальная агрессия',
             'guilt': 'Чувство вины'
         }
+        
         for key, name in scale_names.items():
             text += f"{name}: {averages[key]} баллов\n"
         
         text += f"\n📈 Индекс агрессивности: {averages['aggression_index']}\n"
         text += f"📉 Индекс враждебности: {averages['hostility_index']}\n\n"
+        
+        # Нормы
         text += "Нормы:\n"
         text += "• Индекс агрессивности: 21 ± 4 (17-25)\n"
         text += "• Индекс враждебности: 6.5-7 ± 3 (3.5-10)\n\n"
@@ -211,6 +207,7 @@ class AdminHandler:
             text += "ℹ️ Индекс агрессивности НИЖЕ нормы\n"
         else:
             text += "✅ Индекс агрессивности в пределах нормы\n"
+            
         if averages['hostility_index'] > 10:
             text += "⚠️ Индекс враждебности ПРЕВЫШАЕТ норму\n"
         elif averages['hostility_index'] < 3.5:
@@ -219,230 +216,78 @@ class AdminHandler:
             text += "✅ Индекс враждебности в пределах нормы\n"
         
         text += f"\nВсего тестов: {averages['count']}"
+        
         await query.message.reply_text(text)
     
     async def show_all_averages(self, query, test_type):
         """Показать средние значения по всем факультетам"""
-        if test_type == "eysenck":
-            await self._show_eysenck_averages(query, faculty_name=None)
-        elif test_type == "aggression":
-            await self._show_aggression_averages(query, faculty_name=None)
-        else:
+        if test_type != "aggression":
             await query.message.reply_text("Тест пока не реализован")
+            return
+        
+        averages = self.get_faculty_averages()
+        
+        if not averages:
+            await query.message.reply_text("Нет данных в базе")
+            return
+        
+        text = "📊 Средние значения по всем факультетам:\n\n"
+        
+        scale_names = {
+            'physical_aggression': 'Физическая агрессия',
+            'indirect_aggression': 'Косвенная агрессия',
+            'irritation': 'Раздражение',
+            'negativism': 'Негативизм',
+            'resentment': 'Обида',
+            'suspicion': 'Подозрительность',
+            'verbal_aggression': 'Вербальная агрессия',
+            'guilt': 'Чувство вины'
+        }
+        
+        for key, name in scale_names.items():
+            text += f"{name}: {averages[key]} баллов\n"
+        
+        text += f"\n📈 Индекс агрессивности: {averages['aggression_index']}\n"
+        text += f"📉 Индекс враждебности: {averages['hostility_index']}\n\n"
+        
+        # Нормы
+        text += "Нормы:\n"
+        text += "• Индекс агрессивности: 21 ± 4 (17-25)\n"
+        text += "• Индекс враждебности: 6.5-7 ± 3 (3.5-10)\n\n"
+        
+        # Проверка на превышение норм
+        if averages['aggression_index'] > 25:
+            text += "⚠️ Индекс агрессивности ПРЕВЫШАЕТ норму\n"
+        elif averages['aggression_index'] < 17:
+            text += "ℹ️ Индекс агрессивности НИЖЕ нормы\n"
+        else:
+            text += "✅ Индекс агрессивности в пределах нормы\n"
+            
+        if averages['hostility_index'] > 10:
+            text += "⚠️ Индекс враждебности ПРЕВЫШАЕТ норму\n"
+        elif averages['hostility_index'] < 3.5:
+            text += "ℹ️ Индекс враждебности НИЖЕ нормы\n"
+        else:
+            text += "✅ Индекс враждебности в пределах нормы\n"
+        
+        text += f"\nВсего тестов: {averages['count']}"
+        
+        await query.message.reply_text(text)
     
-    async def show_raw_data_menu(self, update, test_type='aggression'):
-        query = update.callback_query
+    async def show_raw_data_menu(self, update):
+        query=update.callback_query
         """Меню для сырых данных"""
-        # Передаём test_type в callback через суффикс: raw_single_agg / raw_single_eye
-        suffix = 'eye' if test_type == 'eysenck' else 'agg'
         keyboard = [
-            [InlineKeyboardButton("Данные конкретного студента", callback_data=f"raw_single_{suffix}")],
-            [InlineKeyboardButton("Данные факультета", callback_data=f"raw_faculty_{suffix}")],
-            [InlineKeyboardButton("Данные всех факультетов", callback_data=f"raw_all_{suffix}")],
+            [InlineKeyboardButton("Данные конкретного студента", callback_data="raw_single")],
+            [InlineKeyboardButton("Данные факультета", callback_data="raw_faculty")],
+            [InlineKeyboardButton("Данные всех факультетов", callback_data="raw_all")],
+        
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
             "Выберите тип данных:",
             reply_markup=reply_markup
-        )
-
-    def get_eysenck_raw_data(self, student_name=None, faculty=None):
-        """Получение сырых данных теста Айзенка из БД"""
-        conn = sqlite3.connect(self.db_path, timeout=10)
-        cursor = conn.cursor()
-        
-        query = """
-        SELECT 
-            COALESCE(etr.snapshot_full_name, u.full_name) AS full_name,
-            COALESCE(etr.snapshot_user_group, u.user_group) AS user_group,
-            COALESCE(etr.snapshot_faculty, u.faculty) AS faculty,
-            etr.completed_at,
-            etr.extraversion,
-            etr.neuroticism,
-            etr.lie
-        FROM eysenck_test_results etr
-        JOIN users u ON etr.user_id = u.id
-        WHERE 1=1
-        """
-        
-        params = []
-        if student_name:
-            query += " AND LOWER(COALESCE(etr.snapshot_full_name, u.full_name)) LIKE ?"
-            params.append(f"%{student_name.lower()}%")
-        if faculty:
-            query += " AND COALESCE(etr.snapshot_faculty, u.faculty) = ?"
-            params.append(faculty)
-        
-        query += " ORDER BY etr.completed_at DESC"
-        
-        cursor.execute(query, params)
-        results = cursor.fetchall()
-        conn.close()
-        return results
-
-    def get_eysenck_averages(self, faculty=None):
-        """Средние значения теста Айзенка по факультету или всем"""
-        conn = sqlite3.connect(self.db_path, timeout=30)
-        cursor = conn.cursor()
-        
-        query = """
-        SELECT
-            AVG(extraversion),
-            AVG(neuroticism),
-            AVG(lie),
-            COUNT(*)
-        FROM eysenck_test_results etr
-        JOIN users u ON etr.user_id = u.id
-        """
-        params = []
-        if faculty:
-            query += " WHERE COALESCE(etr.snapshot_faculty, u.faculty) = ?"
-            params.append(faculty)
-        
-        cursor.execute(query, params)
-        result = cursor.fetchone()
-        conn.close()
-        
-        if not result or result[3] == 0:
-            return None
-        
-        return {
-            'extraversion': round(result[0], 2),
-            'neuroticism': round(result[1], 2),
-            'lie': round(result[2], 2),
-            'count': result[3],
-        }
-
-    async def _show_eysenck_averages(self, query, faculty_name=None):
-        """Вывод средних по тесту Айзенка"""
-        averages = self.get_eysenck_averages(faculty_name)
-        
-        if not averages:
-            label = f"факультету '{faculty_name}'" if faculty_name else "всем факультетам"
-            await query.message.reply_text(f"Нет данных по {label}")
-            return
-        
-        label = f"факультета '{faculty_name}'" if faculty_name else "всех факультетов"
-        e = averages['extraversion']
-        n = averages['neuroticism']
-        lie = averages['lie']
-        
-        text = f"📊 Средние значения (тест Айзенка) для {label}:\n\n"
-        text += f"Экстраверсия: {e} / 24\n"
-        text += f"Нейротизм: {n} / 24\n"
-        text += f"Шкала лжи: {lie} / 9\n\n"
-        
-        text += "Экстраверсия — Интроверсия (0–24 балла):\n"
-        text += "• 15–24: Ярко выраженный экстраверт\n"
-        text += "• 9–14: Амбиверт\n"
-        text += "• 0–8: Ярко выраженный интроверт\n\n"
-        if e >= 15:
-            text += f"➡️ Среднее ({e}): Ярко выраженный экстраверт\n\n"
-        elif e >= 9:
-            text += f"➡️ Среднее ({e}): Амбиверт\n\n"
-        else:
-            text += f"➡️ Среднее ({e}): Ярко выраженный интроверт\n\n"
-        
-        text += "Нейротизм / Стабильность (0–24 балла):\n"
-        text += "• 13–24: Высокий уровень нейротизма\n"
-        text += "• 9–12: Средний уровень эмоциональности\n"
-        text += "• 0–8: Эмоциональная устойчивость\n\n"
-        if n >= 13:
-            text += f"➡️ Среднее ({n}): Высокий уровень нейротизма\n\n"
-        elif n >= 9:
-            text += f"➡️ Среднее ({n}): Средний уровень эмоциональности\n\n"
-        else:
-            text += f"➡️ Среднее ({n}): Эмоциональная устойчивость\n\n"
-        
-        text += "Шкала лжи (0–9 баллов):\n"
-        text += "• 0–3: Искренность\n"
-        text += "• 4–5: Нормальная искренность\n"
-        text += "• 6–9: Неискренность\n\n"
-        if lie <= 3:
-            text += f"➡️ Среднее ({lie}): Искренность\n\n"
-        elif lie <= 5:
-            text += f"➡️ Среднее ({lie}): Нормальная искренность\n\n"
-        else:
-            text += f"➡️ Среднее ({lie}): Неискренность\n\n"
-        
-        text += f"Всего тестов: {averages['count']}"
-        await query.message.reply_text(text)
-
-    async def show_eysenck_raw_data(self, update, faculty=None, student_name=None):
-        """Показать сырые данные теста Айзенка в Excel файле"""
-        logger1 = logging.getLogger(__name__)
-        
-        if update.callback_query:
-            message = update.callback_query.message
-            await update.callback_query.answer()
-        elif update.message:
-            message = update.message
-        else:
-            return
-        
-        results = self.get_eysenck_raw_data(student_name=student_name, faculty=faculty)
-        
-        if not results:
-            if student_name:
-                await message.reply_text(f"Студент '{student_name}' не найден")
-            else:
-                await message.reply_text("Нет данных по выбранному критерию")
-            return
-        
-        status_msg = await message.reply_text(
-            f"📊 Найдено {len(results)} записей\n🔄 Создаю Excel файл..."
-        )
-        
-        columns = ['ФИО', 'Группа', 'Факультет', 'Дата тестирования',
-                   'Экстраверсия', 'Нейротизм', 'Шкала лжи']
-        
-        df = pd.DataFrame(results, columns=columns)
-        excel_buffer = BytesIO()
-        try:
-            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                df.to_excel(writer, sheet_name='Результаты Айзенка', index=False)
-                worksheet = writer.sheets['Результаты Айзенка']
-                for column in worksheet.columns:
-                    max_length = max(
-                        (len(str(cell.value)) for cell in column if cell.value), default=0
-                    )
-                    worksheet.column_dimensions[column[0].column_letter].width = min(max_length + 2, 50)
-            excel_buffer.seek(0)
-        except Exception as e:
-            logger1.error(f"Ошибка создания Excel Айзенка: {e}")
-            await message.reply_text("❌ Ошибка при создании файла")
-            return
-        
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
-        if student_name:
-            clean = ''.join(c for c in student_name if c.isalnum() or c in (' ', '-', '_'))
-            filename = f"айзенк_{clean}_{timestamp}.xlsx"
-            caption = f"📊 Данные студента: {student_name}\n📁 Записей: {len(results)}"
-        elif faculty:
-            clean = ''.join(c for c in faculty if c.isalnum() or c in (' ', '-', '_'))
-            filename = f"айзенк_{clean}_{timestamp}.xlsx"
-            caption = f"📊 Данные факультета: {faculty}\n📁 Записей: {len(results)}"
-        else:
-            filename = f"айзенк_все_{timestamp}.xlsx"
-            caption = f"📊 Все данные (тест Айзенка)\n📁 Записей: {len(results)}"
-        
-        caption += (
-            "\n\nМаксимальные значения шкал:"
-            "\nЭкстраверсия: 24"
-            "\nНейротизм: 24"
-            "\nШкала лжи: 9"
-        )
-        
-        try:
-            await status_msg.delete()
-        except:
-            pass
-        
-        await message.reply_document(
-            document=excel_buffer,
-            filename=filename,
-            caption=caption
         )
        
     

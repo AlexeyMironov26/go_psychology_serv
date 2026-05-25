@@ -126,22 +126,21 @@ def interpret_eysenck(scores: dict) -> str:
     # Экстраверсия / интроверсия
     if e >= 15:
         e_label = "экстраверт"
-    elif e >= 9:
+    elif e >= 11:
         e_label = "амбиверт"
-    else:
+    else: # 0-10
         e_label = "интроверт"
 
     # Нейротизм
-    if n >= 17:
+    if n >= 23:
         n_label = "с эмоциональной нестабильностью"
-    elif n >= 13:
-        n_label = "с высоким уровнем эмоциональности"
-    elif n >= 9:
-        n_label = "со средним уровнем эмоциональности"
-    else:
+    elif n >= 17:
+        n_label = "с эмоциональной впечатлительностью"
+    elif n >= 11:
+        n_label = "со средней эмоциональностью"
+    else:  # 0-10
         n_label = "с эмоциональной устойчивостью"
-    
-    lie = scores['lie']
+        lie = scores['lie']
 
     result = f"По результатам прохождения теста вы {e_label} {n_label}."
 

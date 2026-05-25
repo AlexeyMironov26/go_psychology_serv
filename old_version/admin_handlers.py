@@ -134,7 +134,7 @@ class AdminHandler:
         
         params = []
         if faculty:
-            query += " WHERE COALESCE(atr.snapshot_faculty, u.faculty) = ?"
+            query += " WHERE u.faculty = ?"
             params.append(faculty)
         
         cursor.execute(query, params)
@@ -297,14 +297,11 @@ class AdminHandler:
         conn = sqlite3.connect(self.db_path, timeout=10)
         cursor = conn.cursor()
         
-        # Используем snapshot_* поля — они хранят данные пользователя
-        # на момент прохождения теста и не меняются при редактировании профиля.
-        # Если snapshot пустой (старые записи до обновления), берём текущие данные из users.
         query = """
         SELECT 
-            COALESCE(atr.snapshot_full_name, u.full_name) AS full_name,
-            COALESCE(atr.snapshot_user_group, u.user_group) AS user_group,
-            COALESCE(atr.snapshot_faculty, u.faculty) AS faculty,
+            u.full_name,
+            u.user_group,
+            u.faculty,
             atr.completed_at,
             atr.physical_aggression,
             atr.indirect_aggression,
@@ -324,11 +321,11 @@ class AdminHandler:
         params = []
         
         if student_name:
-            query += " AND LOWER(COALESCE(atr.snapshot_full_name, u.full_name)) LIKE ?"
+            query += " AND LOWER(u.full_name) LIKE ?"
             params.append(f"%{student_name.lower()}%")
         
         if faculty:
-            query += " AND COALESCE(atr.snapshot_faculty, u.faculty) = ?"
+            query += " AND u.faculty = ?"
             params.append(faculty)
         
         query += " ORDER BY atr.completed_at DESC"

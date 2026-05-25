@@ -61,16 +61,11 @@ class PsychBot:
             ''')
             
             # Таблица результатов теста на агрессию
-            # Колонки snapshot_* хранят данные пользователя на момент прохождения теста,
-            # чтобы при редактировании профиля старые записи не менялись
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS aggression_test_results (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER,
                     test_name TEXT DEFAULT 'Опросник исследования уровня агрессивности',
-                    snapshot_full_name TEXT,
-                    snapshot_user_group TEXT,
-                    snapshot_faculty TEXT,
                     physical_aggression INTEGER,
                     indirect_aggression INTEGER,
                     irritation INTEGER,
@@ -85,13 +80,6 @@ class PsychBot:
                     FOREIGN KEY (user_id) REFERENCES users (id)
                 )
             ''')
-
-            # Добавляем snapshot-колонки если их нет (для существующих БД)
-            for col in ('snapshot_full_name', 'snapshot_user_group', 'snapshot_faculty'):
-                try:
-                    cursor.execute(f'ALTER TABLE aggression_test_results ADD COLUMN {col} TEXT')
-                except sqlite3.OperationalError:
-                    pass  # колонка уже существует
             
             conn.commit()
             conn.close()
@@ -136,25 +124,7 @@ class PsychBot:
             logger.error(f"Unexpected error saving user: {e}")
             return False
         
-    def get_user(self, telegram_id):
-        """Получение пользователя из БД по telegram_id. Возвращает dict или None."""
-        try:
-            conn = sqlite3.connect('psych_bot.db', timeout=5)
-            cursor = conn.cursor()
-            cursor.execute(
-                'SELECT id, full_name, user_group, faculty FROM users WHERE telegram_id = ?',
-                (telegram_id,)
-            )
-            row = cursor.fetchone()
-            conn.close()
-            if row:
-                return {'id': row[0], 'full_name': row[1], 'user_group': row[2], 'faculty': row[3]}
-            return None
-        except Exception as e:
-            logger.error(f"Error fetching user: {e}")
-            return None
-
-    def save_test_result(self, telegram_id, scores, snapshot_name, snapshot_group, snapshot_faculty):
+    def save_test_result(self, telegram_id, scores):
         """Сохранение результата теста в БД"""
         try:
             conn = sqlite3.connect('psych_bot.db', timeout=5)
@@ -175,19 +145,15 @@ class PsychBot:
             
             user_id = user[0]
             
-            # Сохраняем результаты вместе со snapshot данных пользователя
+            # Сохраняем результаты
             cursor.execute('''
                 INSERT INTO aggression_test_results 
-                (user_id, snapshot_full_name, snapshot_user_group, snapshot_faculty,
-                physical_aggression, indirect_aggression, irritation,
+                (user_id, physical_aggression, indirect_aggression, irritation,
                 negativism, resentment, suspicion, verbal_aggression, guilt,
                 aggression_index, hostility_index)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 user_id,
-                snapshot_name,
-                snapshot_group,
-                snapshot_faculty,
                 scores['physical_aggression'],
                 scores['indirect_aggression'],
                 scores['irritation'],
@@ -217,7 +183,6 @@ class PsychBot:
         # Обработчики команд
         self.application.add_handler(CommandHandler("start", self.start))
         self.application.add_handler(CommandHandler("results", self.results))
-        self.application.add_handler(CommandHandler("edit_profile", self.edit_profile))
         
         # Callback (обработчик нажатий на кнопки) обработчик
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
@@ -238,64 +203,13 @@ class PsychBot:
             await self.admin_handler.admin_start(update, context)
             return
         
-        # Проверяем, зарегистрирован ли пользователь
-        existing_user = self.get_user(telegram_id)
-        
-        if existing_user:
-            # Пользователь уже зарегистрирован — загружаем данные в контекст и идём к тесту
-            context.user_data['full_name'] = existing_user['full_name']
-            context.user_data['group'] = existing_user['user_group']
-            context.user_data['faculty'] = existing_user['faculty']
-            
-            keyboard = [[
-                InlineKeyboardButton(
-                    "Тест на исследование уровня агрессивности",
-                    callback_data="test_start_aggression"
-                )
-            ]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await update.message.reply_text(
-                f"С возвращением, {existing_user['full_name'].title()}!\n\n"
-                f"Группа: {existing_user['user_group']} | Факультет: {existing_user['faculty']}\n\n"
-                "Выберите тест для прохождения.\n"
-                "Если хотите изменить личные данные — используйте команду /edit_profile",
-                reply_markup=reply_markup
-            )
-        else:
-            # Новый пользователь — начинаем регистрацию
-            context.user_data['registration_step'] = 'ask_name'
-            
-            await update.message.reply_text(
-                "Добро пожаловать в психологическую службу МТУСИ!\n\n"
-                "Перед прохождением тестирования необходимо заполнить данные.\n\n"
-                "Введите ваше ФИО (например: Иванов Иван Иванович):"
-            )
-
-    async def edit_profile(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Команда /edit_profile — редактирование личных данных"""
-        telegram_id = update.effective_user.id
-        
-        if self.admin_handler.is_admin(telegram_id):
-            await update.message.reply_text("Администраторы не имеют профиля студента.")
-            return
-        
-        existing_user = self.get_user(telegram_id)
-        if not existing_user:
-            await update.message.reply_text(
-                "Вы ещё не зарегистрированы. Используйте /start для регистрации."
-            )
-            return
-        
+        # Для обычных пользователей - начинаем регистрацию
         context.user_data['registration_step'] = 'ask_name'
-        context.user_data['editing_profile'] = True
         
         await update.message.reply_text(
-            f"Текущие данные:\n"
-            f"ФИО: {existing_user['full_name'].title()}\n"
-            f"Группа: {existing_user['user_group']}\n"
-            f"Факультет: {existing_user['faculty']}\n\n"
-            "Введите новое ФИО (или то же самое, если менять не нужно):"
+            "Добро пожаловать в психологическую службу МТУСИ!\n\n"
+            "Перед прохождением тестирования необходимо заполнить данные.\n\n"
+            "Введите ваше ФИО (например: Иванов Иван Иванович):"
         )
     
     async def results(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -436,50 +350,20 @@ class PsychBot:
         
         # Остальной код остается как был
         elif data == "reg_confirm":
-            editing = context.user_data.pop('editing_profile', False)
+            # Показываем инструкцию
+            instruction = (
+                "Предлагаем Вам ответить на ряд вопросов. "
+                "Отвечайте только \"да\" или \"нет\", не раздумывая, сразу же, "
+                "так как важна ваша первая реакция. "
+                "Имейте в виду, что исследуются некоторые личностные, "
+                "а не умственные особенности, так что правильных или "
+                "неправильных ответов здесь нет."
+            )
             
-            if editing:
-                # Сохраняем обновлённые данные в БД
-                telegram_id = query.from_user.id
-                self.save_user(
-                    telegram_id=telegram_id,
-                    full_name=context.user_data['full_name'],
-                    user_group=context.user_data['group'],
-                    faculty=context.user_data['faculty']
-                )
-                # Убираем шаг регистрации
-                context.user_data.pop('registration_step', None)
-                
-                keyboard = [[
-                    InlineKeyboardButton(
-                        "Тест на исследование уровня агрессивности",
-                        callback_data="test_start_aggression"
-                    )
-                ]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                await query.edit_message_text(
-                    "✅ Данные успешно обновлены!\n\n"
-                    f"ФИО: {context.user_data['full_name'].title()}\n"
-                    f"Группа: {context.user_data['group']}\n"
-                    f"Факультет: {context.user_data['faculty']}\n\n"
-                    "Выберите тест для прохождения:",
-                    reply_markup=reply_markup
-                )
-            else:
-                # Показываем инструкцию (первичная регистрация)
-                instruction = (
-                    "Предлагаем Вам ответить на ряд вопросов. "
-                    "Отвечайте только \"да\" или \"нет\", не раздумывая, сразу же, "
-                    "так как важна ваша первая реакция. "
-                    "Имейте в виду, что исследуются некоторые личностные, "
-                    "а не умственные особенности, так что правильных или "
-                    "неправильных ответов здесь нет."
-                )
-                
-                keyboard = [[InlineKeyboardButton("Продолжить", callback_data="reg_continue")]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                
-                await query.edit_message_text(instruction, reply_markup=reply_markup)
+            keyboard = [[InlineKeyboardButton("Продолжить", callback_data="reg_continue")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(instruction, reply_markup=reply_markup)
         
         elif data == "reg_continue":
             # Показываем выбор теста
@@ -669,31 +553,29 @@ class PsychBot:
     
     async def finish_test(self, user, context):  
         """Завершение теста и сохранение результатов"""
-        tg_id = user.id
         try:
+            tg_id = user.id  #тг id пользователя 
             answers = context.user_data['test_answers']
             
             # Проверяем, есть ли данные пользователя
             if not all(key in context.user_data for key in ['full_name', 'group', 'faculty']):
+                # Нужно отправить сообщение, но у нас нет message объекта
+                # Можно отправить через context.bot
                 await context.bot.send_message(
                     chat_id=tg_id,
                     text="Ошибка: данные пользователя не найдены. Пожалуйста, начните сначала с команды /start"
                 )
                 return
             
-            snapshot_name = context.user_data['full_name']
-            snapshot_group = context.user_data['group']
-            snapshot_faculty = context.user_data['faculty']
-
             # Расчет результатов
             scores = self.calculate_scores(answers)
             
-            # Убеждаемся, что пользователь сохранён в БД (на случай первого прохождения)
+           
             user_saved = self.save_user(
                 telegram_id=tg_id,
-                full_name=snapshot_name,
-                user_group=snapshot_group,
-                faculty=snapshot_faculty
+                full_name=context.user_data['full_name'],
+                user_group=context.user_data['group'],
+                faculty=context.user_data['faculty']
             )
             
             if not user_saved:
@@ -703,71 +585,18 @@ class PsychBot:
                 )
                 return
             
-            # Сохранение результатов теста в БД (с snapshot)
-            success = self.save_test_result(
-                tg_id, scores,
-                snapshot_name=snapshot_name,
-                snapshot_group=snapshot_group,
-                snapshot_faculty=snapshot_faculty
-            )
+            # Сохранение результатов теста в БД
+            success = self.save_test_result(tg_id, scores)
             
             if success:
-                # Формируем читаемый результат для пользователя
-                scale_names = {
-                    'physical_aggression': 'Физическая агрессия',
-                    'indirect_aggression': 'Косвенная агрессия',
-                    'irritation': 'Раздражение',
-                    'negativism': 'Негативизм',
-                    'resentment': 'Обида',
-                    'suspicion': 'Подозрительность',
-                    'verbal_aggression': 'Вербальная агрессия',
-                    'guilt': 'Чувство вины',
-                }
-                scale_max = {
-                    'physical_aggression': 10,
-                    'indirect_aggression': 9,
-                    'irritation': 11,
-                    'negativism': 5,
-                    'resentment': 8,
-                    'suspicion': 10,
-                    'verbal_aggression': 12,
-                    'guilt': 9,
-                }
-                
-                result_text = "✅ Ваши результаты сохранены!\n\n📊 <b>Результаты теста:</b>\n\n"
-                for key, name in scale_names.items():
-                    result_text += f"• {name}: <b>{scores[key]}</b> / {scale_max[key]}\n"
-                
-                agg_idx = scores['aggression_index']
-                hos_idx = scores['hostility_index']
-                
-                result_text += f"\n📈 <b>Индекс агрессивности:</b> {agg_idx}"
-                if agg_idx > 25:
-                    result_text += " ⚠️ (выше нормы, норма: 17–25)"
-                elif agg_idx < 17:
-                    result_text += " ℹ️ (ниже нормы, норма: 17–25)"
-                else:
-                    result_text += " ✅ (в норме: 17–25)"
-                
-                result_text += f"\n📉 <b>Индекс враждебности:</b> {hos_idx}"
-                if hos_idx > 10:
-                    result_text += " ⚠️ (выше нормы, норма: 3.5–10)"
-                elif hos_idx < 3.5:
-                    result_text += " ℹ️ (ниже нормы, норма: 3.5–10)"
-                else:
-                    result_text += " ✅ (в норме: 3.5–10)"
-                
-                result_text += "\n\nРезультаты будут доступны психологической службе МТУСИ."
-                
                 await context.bot.send_message(
                     chat_id=tg_id,
-                    text=result_text,
-                    parse_mode='HTML'
+                    text="✅ Ваши результаты успешно сохранены и будут доступны психологической службе."
                 )
             else:
                 await context.bot.send_message(
                     chat_id=tg_id,
-                    text="Произошла ошибка при сохранении результатов."
+                    text="Произошла ошибка при сохранении результатов. "
                 )
         
         except Exception as e:

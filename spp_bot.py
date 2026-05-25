@@ -13,6 +13,7 @@ from eysenck_test import (
     EYSENCK_QUESTIONS, calculate_eysenck_scores,
     interpret_eysenck, save_eysenck_result
 )
+from telegram.request import HTTPXRequest
 
 # Настройка логирования
 logging.basicConfig(
@@ -26,9 +27,16 @@ class PsychBot:
         self.token = token
         self.admin_handler = AdminHandler()
         self.questions = self.get_test_questions()
+
         
     def init(self):
-        workers = (os.cpu_count() or 4) + 2
+        request = HTTPXRequest(
+        proxy='http://127.0.0.1:1443',
+        connect_timeout=30.0,   
+        read_timeout=10.0 )
+        #.request(request)\
+        
+        #workers = (os.cpu_count() or 4) + 2
         self.application = Application.builder()\
             .token(self.token)\
             .concurrent_updates(True)\

@@ -138,8 +138,15 @@ def interpret_eysenck(scores: dict) -> str:
         n_label = "со средним уровнем эмоциональности"
     else:
         n_label = "с эмоциональной устойчивостью"
+    
+    lie = scores['lie']
 
-    return f"По результатам прохождения теста вы {e_label} {n_label}."
+    result = f"По результатам прохождения теста вы {e_label} {n_label}."
+
+    if lie >= 6:
+        result += "\n\n⚠️ Возможно, вы были не до конца искренны в своих ответах."
+
+    return result
 
 
 def save_eysenck_result(db_path: str, telegram_id: int, scores: dict,

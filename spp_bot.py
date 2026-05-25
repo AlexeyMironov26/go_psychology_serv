@@ -53,10 +53,10 @@ class PsychBot:
         """Инициализация базы данных SQLite с таймаутом"""
         try:
             conn = sqlite3.connect('psych_bot.db', timeout=10)
-            
+            cursor = conn.cursor()
             cursor.execute('PRAGMA journal_mode=WAL')
 
-            cursor = conn.cursor()
+            
             
             # Таблица для последнего update_id
             cursor.execute('''

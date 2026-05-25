@@ -68,9 +68,8 @@ EYSENCK_QUESTIONS = [
     "Страдаете ли вы бессонницей?",
 ]
 
-# ─────────────────────────────────────────────
+
 # Ключ подсчёта
-# ─────────────────────────────────────────────
 # Экстраверсия: «да» на вопросы 1,3,8,10,13,17,22,25,27,39,44,46,49,53,56
 #               «нет» на вопросы 5,15,20,29,32,37,41,51
 EXTRAVERSION_YES = {1, 3, 8, 10, 13, 17, 22, 25, 27, 39, 44, 46, 49, 53, 56}
@@ -216,14 +215,14 @@ def save_eysenck_result(db_path: str, telegram_id: int, scores: dict,
 
         user_id = user[0]
 
-        moscow_tz = timezone(timedelta(hours=3))
-        now_moscow = datetime.now(moscow_tz).strftime('%Y-%m-%d %H:%M:%S')
+        # moscow_tz = timezone(timedelta(hours=3))
+        # now_moscow = datetime.now(moscow_tz).strftime('%Y-%m-%d %H:%M:%S')
 
         cursor.execute('''
             INSERT INTO eysenck_test_results
             (user_id, snapshot_full_name, snapshot_user_group, snapshot_faculty,
-             extraversion, neuroticism, lie, completed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             extraversion, neuroticism, lie)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         ''', (
             user_id,
             snapshot_name,
@@ -231,8 +230,7 @@ def save_eysenck_result(db_path: str, telegram_id: int, scores: dict,
             snapshot_faculty,
             scores['extraversion'],
             scores['neuroticism'],
-            scores['lie'],
-            now_moscow
+            scores['lie']
         ))
 
         conn.commit()

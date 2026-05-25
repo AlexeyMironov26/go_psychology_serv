@@ -205,15 +205,15 @@ class PsychBot:
             user_id = user[0]
             
             # Сохраняем результаты вместе со snapshot данных пользователя
-            moscow_tz = timezone(timedelta(hours=3))
-            now_moscow = datetime.now(moscow_tz).strftime('%Y-%m-%d %H:%M:%S')
+            # moscow_tz = timezone(timedelta(hours=3))
+            # now_moscow = datetime.now(moscow_tz).strftime('%Y-%m-%d %H:%M:%S')
             cursor.execute('''
                 INSERT INTO aggression_test_results 
                 (user_id, snapshot_full_name, snapshot_user_group, snapshot_faculty,
                 physical_aggression, indirect_aggression, irritation,
                 negativism, resentment, suspicion, verbal_aggression, guilt,
-                aggression_index, hostility_index, completed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                aggression_index, hostility_index)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 user_id,
                 snapshot_name,
@@ -228,8 +228,7 @@ class PsychBot:
                 scores['verbal_aggression'],
                 scores['guilt'],
                 scores['aggression_index'],
-                scores['hostility_index'],
-                now_moscow
+                scores['hostility_index']
             ))
             
             conn.commit()
@@ -809,7 +808,7 @@ class PsychBot:
                 )
                 return
 
-            # ── Тест Айзенка ──────────────────────────────────────────
+            # Тест Айзенка
             if test_type == 'eysenck':
                 scores = calculate_eysenck_scores(answers)
                 success = save_eysenck_result(
@@ -835,7 +834,7 @@ class PsychBot:
                     )
                 return
 
-            # ── Тест на агрессию ──────────────────────────────────────
+            # Тест на агрессию 
             scores = self.calculate_scores(answers)
             success = self.save_test_result(
                 tg_id, scores,
@@ -867,8 +866,8 @@ class PsychBot:
                 }
                 
                 result_text = "✅ Ваши результаты сохранены!\n\n📊 <b>Результаты теста:</b>\n\n"
-                for key, name in scale_names.items():
-                    result_text += f"• {name}: <b>{scores[key]}</b> / {scale_max[key]}\n"
+                # for key, name in scale_names.items():
+                #     result_text += f"• {name}: <b>{scores[key]}</b> / {scale_max[key]}\n"
                 
                 agg_idx = scores['aggression_index']
                 hos_idx = scores['hostility_index']

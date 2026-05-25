@@ -401,6 +401,11 @@ class AdminHandler:
                    'Экстраверсия', 'Нейротизм', 'Шкала лжи']
         
         df = pd.DataFrame(results, columns=columns)
+        if not df.empty and 'Дата тестирования' in df.columns:
+            df['Дата тестирования'] = pd.to_datetime(df['Дата тестирования'])
+            df['Дата тестирования'] = df['Дата тестирования'] + pd.Timedelta(hours=3)
+            df['Дата тестирования'] = df['Дата тестирования'].dt.strftime('%Y-%m-%d %H:%M:%S')
+            
         excel_buffer = BytesIO()
         try:
             with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
@@ -522,7 +527,10 @@ class AdminHandler:
             
             # Создаем DataFrame
             df = pd.DataFrame(results, columns=columns)
-            
+            if not df.empty and 'Дата тестирования' in df.columns:
+                df['Дата тестирования'] = pd.to_datetime(df['Дата тестирования'])
+                df['Дата тестирования'] = df['Дата тестирования'] + pd.Timedelta(hours=3)
+                df['Дата тестирования'] = df['Дата тестирования'].dt.strftime('%Y-%m-%d %H:%M:%S')
             # Создаем Excel в памяти
             excel_buffer = BytesIO()
             

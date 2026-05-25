@@ -1,6 +1,7 @@
 import json
 import sqlite3 # норма враждебности 3.5-10
 import logging # норма агрессивности 17-25
+from telegram.ext import AIORateLimiter
 import os
 from datetime import datetime, timezone, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -40,8 +41,10 @@ class PsychBot:
         self.application = Application.builder()\
             .token(self.token)\
             .concurrent_updates(True)\
+            .rate_limiter(AIORateLimiter())\
             .build()
-        
+#ограничение частоты запросов к тг (30/сек на все чаты, если больше, 
+# то бот просто подождёт и отправит чуть позже, защита от флуда и ограничений бота телеграмом)        
         self.init_database()
         self.setup_handlers()
         # self.load_last_update_id()
@@ -50,6 +53,9 @@ class PsychBot:
         """Инициализация базы данных SQLite с таймаутом"""
         try:
             conn = sqlite3.connect('psych_bot.db', timeout=10)
+            
+            cursor.execute('PRAGMA journal_mode=WAL')
+
             cursor = conn.cursor()
             
             # Таблица для последнего update_id
